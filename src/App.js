@@ -93,7 +93,7 @@ function Login({ onLogin }) {
     const data = await db.get("users", `?email=eq.${email}&select=*`);
     if (!data.length) { setErr("User not found"); setLoading(false); return; }
     const user = data[0];
-    if (pass !== "school1234" && pass !== user.id.slice(0,8)) {
+    if (pass !== "school1234") {
       setErr("Incorrect password"); setLoading(false); return;
     }
     onLogin(user);
