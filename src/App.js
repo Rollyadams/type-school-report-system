@@ -834,17 +834,17 @@ function ViewResults({ students, classes, terms }) {
         windowHeight: reportEl.scrollHeight,
       });
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-const pageWidth = pdf.internal.pageSize.getWidth();
-const pageHeight = pdf.internal.pageSize.getHeight();
-const canvasRatio = canvas.height / canvas.width;
-const imgHeight = pageWidth * canvasRatio;
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const canvasRatio = canvas.height / canvas.width;
+      const imgHeight = pageWidth * canvasRatio;
 
-if (imgHeight <= pageHeight) {
-  pdf.addImage(imgData, "PNG", 0, 0, pageWidth, imgHeight);
-} else {
-  let position = 0;
-  let remaining = imgHeight;
-  while (remaining > 0) {
+      if (imgHeight <= pageHeight) {
+      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, imgHeight);
+      } else {
+       let position = 0;
+       let remaining = imgHeight;
+      while (remaining > 0) {
     pdf.addImage(imgData, "PNG", 0, position, pageWidth, imgHeight);
     remaining -= pageHeight;
     position -= pageHeight;
