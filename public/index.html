@@ -4,10 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Career Builder Schools</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.onload = function() {
+        var s1 = document.createElement('script');
+        s1.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+        s1.onload = function() {
+          var s2 = document.createElement('script');
+          s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+          document.body.appendChild(s2);
+        };
+        document.body.appendChild(s1);
+      };
+    </script>
   </body>
 </html>
