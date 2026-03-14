@@ -833,11 +833,24 @@ function ViewResults({ students, classes, terms }) {
         windowWidth: reportEl.scrollWidth,
         windowHeight: reportEl.scrollHeight,
       });
-      const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = (canvas.height * pageWidth) / canvas.width;
-      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
+const pageWidth = pdf.internal.pageSize.getWidth();
+const pageHeight = pdf.internal.pageSize.getHeight();
+const canvasRatio = canvas.height / canvas.width;
+const imgHeight = pageWidth * canvasRatio;
+
+if (imgHeight <= pageHeight) {
+  pdf.addImage(imgData, "PNG", 0, 0, pageWidth, imgHeight);
+} else {
+  let position = 0;
+  let remaining = imgHeight;
+  while (remaining > 0) {
+    pdf.addImage(imgData, "PNG", 0, position, pageWidth, imgHeight);
+    remaining -= pageHeight;
+    position -= pageHeight;
+    if (remaining > 0) pdf.addPage();
+  }
+}
       pdf.save(`${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`);
       setTimeout(() => {
         const phone = student.guardian_phone?.replace(/\D/g,"");
