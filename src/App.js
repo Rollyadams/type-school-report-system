@@ -54,6 +54,14 @@ const NIGERIAN_SUBJECTS = {
   "SS 3 Commercial": ["English Language","Mathematics","Accounting","Commerce","Business Studies","Economics","Marketing","Office Practice","Computer Applications","CRS/IRS"],
 };
 
+const MESSAGE_TEMPLATES = {
+  "School Resumption": "Dear Parent/Guardian, this is to inform you that school resumes on [DATE]. Please ensure your ward reports on time. Thank you. — Career Builder Schools",
+  "Fee Payment Reminder": "Dear Parent/Guardian, this is a reminder that school fees for [TERM] are due. Please make payment on or before [DATE] to avoid any disruption. Thank you. — Career Builder Schools",
+  "PTA Meeting": "Dear Parent/Guardian, you are cordially invited to our PTA meeting scheduled for [DATE] at [TIME]. Your attendance is important. Thank you. — Career Builder Schools",
+  "Emergency Notice": "URGENT: Dear Parent/Guardian, please be informed that [MESSAGE]. Please contact the school immediately. Thank you. — Career Builder Schools",
+  "Custom Message": "",
+};
+
 const getGrade = (score) => {
   if (score >= 90) return { g: "A+", r: "Outstanding", col: "#059669" };
   if (score >= 80) return { g: "A",  r: "Excellent",    col: "#10b981" };
@@ -166,6 +174,7 @@ function PrincipalDash({ user, onLogout }) {
     { id:"teachers", label:"Teachers", icon:"👩‍🏫" },
     { id:"sessions", label:"Sessions", icon:"📅" },
     { id:"results",  label:"Results",  icon:"📋" },
+    { id:"messages", label:"Messages", icon:"📨" },
   ];
 
   return (
@@ -195,6 +204,7 @@ function PrincipalDash({ user, onLogout }) {
             {tab === "teachers" && <ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id} />}
             {tab === "sessions" && <ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={school?.id} />}
             {tab === "results"  && <ViewResults students={students} classes={classes} terms={terms} />}
+            {tab === "messages" && <Messages students={students} classes={classes} />}
           </>
         )}
       </div>
@@ -224,6 +234,258 @@ function Overview({ students, classes, teachers, terms }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function Messages({ students, classes }) {
+  const [msgType, setMsgType] = useState("School Resumption");
+  const [message, setMessage] = useState(MESSAGE_TEMPLATES["School Resumption"]);
+  const [sendTo, setSendTo] = useState("all");
+  const [selectedClass, setSelectedClass] = useState("");
+  const [selectedStudent, setSelectedStudent] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [recipients, setRecipients] = useState([]);
+  const [phase, setPhase] = useState("compose"); // compose | sending | done
+
+  useEffect(() => {
+    setMessage(MESSAGE_TEMPLATES[msgType] || "");
+  }, [msgType]);
+
+  useEffect(() => {
+    // Build recipients list
+    let list = [];
+    if (sendTo === "all") {
+      list = students.filter(s => s.guardian_phone);
+    } else if (sendTo === "class" && selectedClass) {
+      list = students.filter(s => s.class_id === selectedClass && s.guardian_phone);
+    } else if (sendTo === "individual" && selectedStudent) {
+      const s = students.find(s => s.id === selectedStudent);
+      if (s?.guardian_phone) list = [s];
+    }
+    setRecipients(list);
+  }, [sendTo, selectedClass, selectedStudent, students]);
+
+  const startSending = () => {
+    if (!message.trim()) return alert("Please type a message");
+    if (!recipients.length) return alert("No recipients with WhatsApp numbers found");
+    setPhase("sending");
+    setCurrentIndex(0);
+    setSent(0);
+    setTotal(recipients.length);
+    sendNext(0, recipients);
+  };
+
+  const sendNext = (index, list) => {
+    if (index >= list.length) {
+      setPhase("done");
+      return;
+    }
+    const student = list[index];
+    const phone = student.guardian_phone?.replace(/\D/g,"");
+    const personalMsg = message
+      .replace("[PARENT]", student.guardian_name || "Parent")
+      .replace("[STUDENT]", student.full_name);
+    const url = `https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(personalMsg)}`;
+    window.open(url, "_blank");
+    setCurrentIndex(index);
+    setSent(index + 1);
+  };
+
+  const handleNext = () => {
+    const nextIndex = currentIndex + 1;
+    if (nextIndex >= recipients.length) {
+      setPhase("done");
+    } else {
+      setCurrentIndex(nextIndex);
+      sendNext(nextIndex, recipients);
+    }
+  };
+
+  const reset = () => {
+    setPhase("compose");
+    setSent(0);
+    setCurrentIndex(0);
+  };
+
+  if (phase === "sending") {
+    const current = recipients[currentIndex];
+    const cls = classes.find(c => c.id === current?.class_id);
+    return (
+      <div>
+        <div style={S.section("#25d366")}>
+          <span>📨</span>
+          <span style={{ fontWeight:800, color:"#25d366" }}>Sending Messages — {sent} of {total}</span>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ background:"#e2e8f0", borderRadius:10, height:12, marginBottom:20, overflow:"hidden" }}>
+          <div style={{ background:"#25d366", height:"100%", width:`${(sent/total)*100}%`, borderRadius:10, transition:"width 0.3s" }} />
+        </div>
+
+        <div style={{ ...S.card, textAlign:"center", padding:32 }}>
+          <div style={{ fontSize:48, marginBottom:12 }}>📱</div>
+          <div style={{ fontSize:18, fontWeight:800, color:"#1e293b", marginBottom:6 }}>{current?.full_name}</div>
+          <div style={{ fontSize:14, color:"#64748b", marginBottom:4 }}>Guardian: {current?.guardian_name}</div>
+          <div style={{ fontSize:14, color:"#64748b", marginBottom:4 }}>Class: {cls?.name} {cls?.arm||""}</div>
+          <div style={{ fontSize:16, fontWeight:700, color:"#25d366", marginBottom:20 }}>📱 {current?.guardian_phone}</div>
+          <p style={{ color:"#64748b", fontSize:13, marginBottom:24, background:"#f8fafc", padding:12, borderRadius:10, textAlign:"left" }}>{message}</p>
+          <p style={{ color:"#94a3b8", fontSize:12, marginBottom:16 }}>WhatsApp has opened. After sending, tap the button below to continue to the next parent.</p>
+          <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap" }}>
+            <button onClick={handleNext} style={{ ...S.btn("#25d366"), padding:"12px 28px", fontSize:15 }}>
+              {currentIndex + 1 >= total ? "✅ Done" : "Next Parent →"}
+            </button>
+            <button onClick={()=>sendNext(currentIndex, recipients)} style={{ ...S.btn("#6366f1") }}>
+              🔄 Resend This
+            </button>
+            <button onClick={reset} style={{ ...S.btn("#64748b") }}>Cancel</button>
+          </div>
+        </div>
+
+        {/* Recipients list */}
+        <div style={S.card}>
+          <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>All Recipients</div>
+          {recipients.map((r, i) => (
+            <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f1f5f9" }}>
+              <div style={{ width:24, height:24, borderRadius:"50%", background: i < sent ? "#10b981" : i === currentIndex ? "#f59e0b" : "#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, color:"#fff", fontWeight:800, flexShrink:0 }}>
+                {i < sent ? "✓" : i + 1}
+              </div>
+              <div>
+                <div style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{r.full_name}</div>
+                <div style={{ fontSize:12, color:"#64748b" }}>{r.guardian_name} • {r.guardian_phone}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "done") {
+    return (
+      <div style={{ textAlign:"center", padding:40 }}>
+        <div style={{ fontSize:64, marginBottom:16 }}>🎉</div>
+        <h2 style={{ color:"#1e293b", marginBottom:8 }}>All Messages Sent!</h2>
+        <p style={{ color:"#64748b", marginBottom:24 }}>Successfully sent to {total} parents via WhatsApp</p>
+        <button onClick={reset} style={{ ...S.btn("#6366f1"), padding:"12px 28px" }}>Send Another Message</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={S.section("#25d366")}>
+        <span>📨</span>
+        <span style={{ fontWeight:800, color:"#25d366" }}>Send Message to Parents</span>
+      </div>
+
+      <div style={S.card}>
+        {/* Message Type */}
+        <div style={{ marginBottom:16 }}>
+          <label style={S.label}>Message Type</label>
+          <select style={S.input} value={msgType} onChange={e=>setMsgType(e.target.value)}>
+            {Object.keys(MESSAGE_TEMPLATES).map(t => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+
+        {/* Message Body */}
+        <div style={{ marginBottom:16 }}>
+          <label style={S.label}>Message</label>
+          <textarea
+            style={{ ...S.input, height:120, resize:"vertical" }}
+            value={message}
+            onChange={e=>setMessage(e.target.value)}
+            placeholder="Type your message here..."
+          />
+          <div style={{ fontSize:11, color:"#94a3b8", marginTop:4 }}>
+            Tip: Use [PARENT] for guardian name, [STUDENT] for student name — they'll be replaced automatically
+          </div>
+        </div>
+
+        {/* Send To */}
+        <div style={{ marginBottom:16 }}>
+          <label style={S.label}>Send To</label>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {[
+              { id:"all", label:`All Parents (${students.filter(s=>s.guardian_phone).length})`, icon:"👥" },
+              { id:"class", label:"Specific Class", icon:"🏫" },
+              { id:"individual", label:"One Parent", icon:"👤" },
+            ].map(o => (
+              <button key={o.id} onClick={()=>setSendTo(o.id)} style={{ ...S.btn(sendTo===o.id?"#6366f1":"#e2e8f0"), color: sendTo===o.id?"#fff":"#475569", padding:"8px 14px", fontSize:13 }}>
+                {o.icon} {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Class selector */}
+        {sendTo === "class" && (
+          <div style={{ marginBottom:16 }}>
+            <label style={S.label}>Select Class</label>
+            <select style={S.input} value={selectedClass} onChange={e=>setSelectedClass(e.target.value)}>
+              <option value="">Choose class</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Individual selector */}
+        {sendTo === "individual" && (
+          <div style={{ marginBottom:16 }}>
+            <label style={S.label}>Select Student</label>
+            <select style={S.input} value={selectedStudent} onChange={e=>setSelectedStudent(e.target.value)}>
+              <option value="">Choose student</option>
+              {students.filter(s=>s.guardian_phone).map(s => (
+                <option key={s.id} value={s.id}>{s.full_name} — {s.guardian_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Recipients Preview */}
+      {recipients.length > 0 && (
+        <div style={S.card}>
+          <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>
+            👥 Recipients Preview ({recipients.length} parents)
+          </div>
+          {recipients.slice(0,5).map(r => {
+            const cls = classes.find(c => c.id === r.class_id);
+            return (
+              <div key={r.id} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #f1f5f9" }}>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{r.full_name}</div>
+                  <div style={{ fontSize:12, color:"#64748b" }}>{r.guardian_name} • {cls?.name} {cls?.arm||""}</div>
+                </div>
+                <div style={{ fontSize:13, color:"#25d366", fontWeight:600 }}>📱 {r.guardian_phone}</div>
+              </div>
+            );
+          })}
+          {recipients.length > 5 && (
+            <div style={{ fontSize:12, color:"#94a3b8", textAlign:"center", paddingTop:8 }}>
+              +{recipients.length - 5} more parents
+            </div>
+          )}
+        </div>
+      )}
+
+      {recipients.length === 0 && sendTo !== "compose" && (
+        <div style={{ ...S.card, textAlign:"center", color:"#94a3b8", padding:24 }}>
+          ⚠️ No parents with WhatsApp numbers found for this selection
+        </div>
+      )}
+
+      {/* Send Button */}
+      <button
+        onClick={startSending}
+        disabled={!recipients.length || !message.trim()}
+        style={{ ...S.btn("#25d366"), width:"100%", padding:"16px", fontSize:16, opacity: !recipients.length || !message.trim() ? 0.5 : 1 }}
+      >
+        💬 Send to {recipients.length} Parent{recipients.length !== 1 ? "s" : ""} via WhatsApp
+      </button>
     </div>
   );
 }
@@ -448,12 +710,10 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
       <div style={S.section("#f59e0b")}>
         <span>📅</span><span style={{ fontWeight:800, color:"#f59e0b" }}>Academic Sessions & Terms</span>
       </div>
-
       <div style={{ display:"flex", gap:10, marginBottom:16 }}>
         <button onClick={()=>setAddSess(!addSess)} style={S.btn("#f59e0b")}>{addSess?"Cancel":"+ New Session"}</button>
         <button onClick={()=>setAddTerm(!addTerm)} style={S.btn("#6366f1")}>{addTerm?"Cancel":"+ New Term"}</button>
       </div>
-
       {addSess && (
         <div style={S.card}>
           <label style={S.label}>Session Name (e.g. 2024/2025)</label>
@@ -461,7 +721,6 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
           <button onClick={saveSess} style={{ ...S.btn("#f59e0b"), marginTop:12 }}>Save Session</button>
         </div>
       )}
-
       {addTerm && (
         <div style={S.card}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
@@ -491,7 +750,6 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
           <button onClick={saveTerm} style={{ ...S.btn("#6366f1"), marginTop:12 }}>Save Term</button>
         </div>
       )}
-
       {sessions.map(sess => (
         <div key={sess.id} style={S.card}>
           <div style={{ fontWeight:800, color:"#1e293b", fontSize:16, marginBottom:10 }}>📅 {sess.name}</div>
@@ -562,24 +820,25 @@ function ViewResults({ students, classes, terms }) {
     try {
       const reportEl = document.getElementById("report-card");
       if (!reportEl) { setGenerating(false); return; }
-
       const html2canvas = window.html2canvas;
       const jsPDF = window.jspdf?.jsPDF;
-
       if (!html2canvas || !jsPDF) {
         alert("PDF generator loading... please try again in a moment");
         setGenerating(false); return;
       }
-
-      const canvas = await html2canvas(reportEl, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+      const canvas = await html2canvas(reportEl, {
+        scale: 1,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        windowWidth: reportEl.scrollWidth,
+        windowHeight: reportEl.scrollHeight,
+      });
       const imgData = canvas.toDataURL("image/png");
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = (canvas.height * pageWidth) / canvas.width;
       pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
-      const fileName = `${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`;
-      pdf.save(fileName);
-
+      pdf.save(`${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`);
       setTimeout(() => {
         const phone = student.guardian_phone?.replace(/\D/g,"");
         const term = terms.find(t=>t.id===selectedTerm);
@@ -588,7 +847,7 @@ function ViewResults({ students, classes, terms }) {
         setGenerating(false);
       }, 2000);
     } catch(e) {
-      alert("Error generating PDF. Please try Print instead.");
+      alert("Error generating PDF. Please use Print instead.");
       setGenerating(false);
     }
   };
@@ -606,13 +865,9 @@ function ViewResults({ students, classes, terms }) {
     return (
       <div>
         <div style={{ display:"flex", gap:8, padding:"12px 0", flexWrap:"wrap" }}>
-          <button onClick={()=>setReportStudent(null)} style={{ ...S.btn("#64748b") }}>← Back</button>
-          <button onClick={()=>window.print()} style={{ ...S.btn("#10b981") }}>🖨 Print</button>
-          <button
-            onClick={() => downloadAndWhatsApp(reportStudent)}
-            disabled={generating}
-            style={{ ...S.btn("#25d366") }}
-          >
+          <button onClick={()=>setReportStudent(null)} style={S.btn("#64748b")}>← Back</button>
+          <button onClick={()=>window.print()} style={S.btn("#10b981")}>🖨 Print</button>
+          <button onClick={()=>downloadAndWhatsApp(reportStudent)} disabled={generating} style={S.btn("#25d366")}>
             {generating ? "⏳ Generating..." : "📥 Download PDF & WhatsApp"}
           </button>
         </div>
@@ -793,8 +1048,7 @@ function TeacherDash({ user, onLogout }) {
   useEffect(() => {
     if (!selectedClass) return;
     const cls = classes.find(c => c.id === selectedClass);
-    const subs = cls ? (NIGERIAN_SUBJECTS[cls.name] || []) : [];
-    setSubjects(subs);
+    setSubjects(cls ? (NIGERIAN_SUBJECTS[cls.name] || []) : []);
     db.get("students", `?class_id=eq.${selectedClass}&select=*`).then(setStudents);
   }, [selectedClass]);
 
@@ -876,7 +1130,6 @@ function TeacherDash({ user, onLogout }) {
               </select>
             </div>
           </div>
-
           {selectedClass && (
             <div>
               <label style={S.label}>Select Student</label>
@@ -890,16 +1143,12 @@ function TeacherDash({ user, onLogout }) {
 
         {selectedStudent && (
           <div style={S.card}>
-            <div style={{ fontWeight:800, color:"#1e293b", fontSize:16, marginBottom:16 }}>
-              📋 Results for {selectedStudent.full_name}
-            </div>
-
-            <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr", gap:8, marginBottom:8, padding:"0 4px" }}>
-              {["Subject","C.A (40%)","Exam (60%)","Total"].map(h => (
+            <div style={{ fontWeight:800, color:"#1e293b", fontSize:16, marginBottom:16 }}>📋 Results for {selectedStudent.full_name}</div>
+            <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr", gap:8, marginBottom:8 }}>
+              {["Subject","C.A","Exam","Total"].map(h => (
                 <div key={h} style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase" }}>{h}</div>
               ))}
             </div>
-
             {subjects.map(sub => {
               const sc = scores[sub] || { ca:"", exam:"" };
               const total = (Number(sc.ca)||0) + (Number(sc.exam)||0);
@@ -926,7 +1175,6 @@ function TeacherDash({ user, onLogout }) {
                   <input type="number" style={S.input} value={attendance.total_days} onChange={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62" />
                 </div>
               </div>
-
               <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>💬 Remarks</div>
               <div style={{ marginBottom:12 }}>
                 <label style={S.label}>Class Teacher's Remark</label>
@@ -939,7 +1187,6 @@ function TeacherDash({ user, onLogout }) {
             </div>
 
             {saved && <div style={{ background:"#f0fdf4", border:"1.5px solid #10b981", borderRadius:10, padding:"10px 16px", color:"#059669", fontWeight:700, marginBottom:12, textAlign:"center" }}>✅ Results saved successfully!</div>}
-
             <button onClick={saveResults} disabled={saving} style={{ ...S.btn("#10b981"), width:"100%", padding:"13px", fontSize:15 }}>
               {saving ? "Saving..." : "💾 Save Results"}
             </button>
