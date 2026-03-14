@@ -64,13 +64,11 @@ const getGrade = (score) => {
   return                   { g: "F",  r: "Fail",         col: "#7f1d1d" };
 };
 
-const getPosition = (n) => {
-  const s = ["th","st","nd","rd"];
-  const v = n % 100;
+const ordinal = (n) => {
+  const s = ["th","st","nd","rd"], v = n % 100;
   return n + (s[(v-20)%10] || s[v] || s[0]);
 };
 
-// ─── STYLES ───────────────────────────────────────────────
 const S = {
   app: { minHeight:"100vh", background:"#f0f4ff", fontFamily:"'Segoe UI',sans-serif" },
   card: { background:"#fff", borderRadius:16, padding:24, boxShadow:"0 2px 16px #0000000d", marginBottom:16 },
@@ -81,7 +79,6 @@ const S = {
   section: (col="#6366f1") => ({ display:"flex", alignItems:"center", gap:10, padding:"10px 16px", background:`${col}15`, borderRadius:10, marginBottom:20, borderLeft:`4px solid ${col}` }),
 };
 
-// ─── LOGIN ────────────────────────────────────────────────
 function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
@@ -90,13 +87,21 @@ function Login({ onLogin }) {
 
   const login = async () => {
     setLoading(true); setErr("");
-    const data = await db.get("users", `?email=eq.${email}&select=*`);
-    if (!data.length) { setErr("User not found"); setLoading(false); return; }
-    const user = data[0];
-    if (pass !== "school1234") {
-      setErr("Incorrect password"); setLoading(false); return;
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/users?email=eq.${encodeURIComponent(email)}&select=*`,
+        { headers }
+      );
+      const data = await res.json();
+      if (!data.length) { setErr("User not found"); setLoading(false); return; }
+      const user = data[0];
+      if (pass !== "school1234") {
+        setErr("Incorrect password"); setLoading(false); return;
+      }
+      onLogin(user);
+    } catch(e) {
+      setErr("Connection error. Try again.");
     }
-    onLogin(user);
     setLoading(false);
   };
 
@@ -126,7 +131,6 @@ function Login({ onLogin }) {
   );
 }
 
-// ─── PRINCIPAL DASHBOARD ──────────────────────────────────
 function PrincipalDash({ user, onLogout }) {
   const [tab, setTab] = useState("overview");
   const [students, setStudents] = useState([]);
@@ -166,7 +170,6 @@ function PrincipalDash({ user, onLogout }) {
 
   return (
     <div style={S.app}>
-      {/* Top Bar */}
       <div style={{ background:"linear-gradient(135deg,#1e3a8a,#4338ca)", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
           <div style={{ color:"#fff", fontWeight:900, fontSize:16 }}>🎓 Career Builder Schools</div>
@@ -175,7 +178,6 @@ function PrincipalDash({ user, onLogout }) {
         <button onClick={onLogout} style={{ background:"#ffffff20", border:"none", color:"#fff", borderRadius:8, padding:"6px 14px", cursor:"pointer", fontSize:13 }}>Logout</button>
       </div>
 
-      {/* Tabs */}
       <div style={{ display:"flex", overflowX:"auto", background:"#fff", borderBottom:"2px solid #e0e7ff", padding:"0 12px" }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ padding:"12px 14px", border:"none", borderBottom: tab===t.id ? "3px solid #6366f1" : "3px solid transparent", background:"none", color: tab===t.id ? "#6366f1" : "#64748b", fontWeight: tab===t.id ? 800 : 500, fontSize:13, cursor:"pointer", whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:6 }}>
@@ -397,7 +399,7 @@ function ManageTeachers({ teachers, classes, reload, schoolId }) {
               <input style={S.input} value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="teacher@school.com" type="email" />
             </div>
           </div>
-          <p style={{ fontSize:12, color:"#94a3b8", margin:"12px 0 0" }}>Default password: <strong>school1234</strong> — teacher can change after first login</p>
+          <p style={{ fontSize:12, color:"#94a3b8", margin:"12px 0 0" }}>Default password: <strong>school1234</strong></p>
           <button onClick={save} disabled={saving} style={{ ...S.btn("#10b981"), marginTop:12 }}>{saving?"Saving...":"Save Teacher"}</button>
         </div>
       )}
@@ -430,7 +432,6 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
   const saveTerm = async () => {
     if (!tForm.name || !tForm.session_id) return alert("Fill all fields");
     if (tForm.is_current) {
-      // unset others
       for (const t of terms) { if (t.is_current) await db.patch("terms", t.id, { is_current: false }); }
     }
     await db.post("terms", tForm);
@@ -514,11 +515,11 @@ function ViewResults({ students, classes, terms }) {
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedTerm, setSelectedTerm] = useState(terms.find(t=>t.is_current)?.id || "");
   const [results, setResults] = useState([]);
-  const [subjects, setSubjects] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [remarks, setRemarks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [reportStudent, setReportStudent] = useState(null);
+  const [generating, setGenerating] = useState(false);
 
   const load = async () => {
     if (!selectedClass || !selectedTerm) return;
@@ -531,15 +532,15 @@ function ViewResults({ students, classes, terms }) {
       db.get("attendance", `?student_id=in.(${ids.join(",")})&term_id=eq.${selectedTerm}&select=*`),
       db.get("remarks", `?student_id=in.(${ids.join(",")})&term_id=eq.${selectedTerm}&select=*`),
     ]);
-    const cls = classes.find(c => c.id === selectedClass);
-    const subs = cls ? (NIGERIAN_SUBJECTS[cls.name] || []) : [];
-    setSubjects(subs); setResults(r); setAttendance(a); setRemarks(rem);
+    setResults(r); setAttendance(a); setRemarks(rem);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, [selectedClass, selectedTerm]);
 
   const classStudents = students.filter(s => s.class_id === selectedClass);
+  const cls = classes.find(c => c.id === selectedClass);
+  const subjects = cls ? (NIGERIAN_SUBJECTS[cls.name] || []) : [];
 
   const getStudentResults = (studentId) => {
     return subjects.map(sub => {
@@ -556,8 +557,43 @@ function ViewResults({ students, classes, terms }) {
     return totals.findIndex(t => t.id === studentId) + 1;
   };
 
+  const downloadAndWhatsApp = async (student) => {
+    setGenerating(true);
+    try {
+      const reportEl = document.getElementById("report-card");
+      if (!reportEl) { setGenerating(false); return; }
+
+      const html2canvas = window.html2canvas;
+      const jsPDF = window.jspdf?.jsPDF;
+
+      if (!html2canvas || !jsPDF) {
+        alert("PDF generator loading... please try again in a moment");
+        setGenerating(false); return;
+      }
+
+      const canvas = await html2canvas(reportEl, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = (canvas.height * pageWidth) / canvas.width;
+      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
+      const fileName = `${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`;
+      pdf.save(fileName);
+
+      setTimeout(() => {
+        const phone = student.guardian_phone?.replace(/\D/g,"");
+        const term = terms.find(t=>t.id===selectedTerm);
+        const msg = `Dear ${student.guardian_name||"Parent"}, the report card for ${student.full_name} (${term?.name||""}) has been downloaded. Please check your files, print and sign.`;
+        window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(msg)}`, "_blank");
+        setGenerating(false);
+      }, 2000);
+    } catch(e) {
+      alert("Error generating PDF. Please try Print instead.");
+      setGenerating(false);
+    }
+  };
+
   if (reportStudent) {
-    const cls = classes.find(c => c.id === selectedClass);
     const term = terms.find(t => t.id === selectedTerm);
     const att = attendance.find(a => a.student_id === reportStudent.id);
     const rem = remarks.find(r => r.student_id === reportStudent.id);
@@ -569,13 +605,17 @@ function ViewResults({ students, classes, terms }) {
 
     return (
       <div>
-        <button onClick={()=>setReportStudent(null)} style={{ ...S.btn("#64748b"), marginBottom:16 }}>← Back to Class</button>
-        <button onClick={()=>window.print()} style={{ ...S.btn("#10b981"), marginBottom:16, marginLeft:8 }}>🖨 Print / Save PDF</button>
-        <button onClick={()=>{
-          const phone = reportStudent.guardian_phone?.replace(/\D/g,"");
-          const url = `https://wa.me/234${phone?.slice(-10)}?text=Dear%20${encodeURIComponent(reportStudent.guardian_name||"Parent")}%2C%20please%20find%20attached%20the%20report%20card%20for%20${encodeURIComponent(reportStudent.full_name)}%20for%20${encodeURIComponent(term?.name||"")}%20term.%20Please%20print%20and%20sign.`;
-          window.open(url,"_blank");
-        }} style={{ ...S.btn("#25d366"), marginBottom:16, marginLeft:8 }}>💬 WhatsApp Parent</button>
+        <div style={{ display:"flex", gap:8, padding:"12px 0", flexWrap:"wrap" }}>
+          <button onClick={()=>setReportStudent(null)} style={{ ...S.btn("#64748b") }}>← Back</button>
+          <button onClick={()=>window.print()} style={{ ...S.btn("#10b981") }}>🖨 Print</button>
+          <button
+            onClick={() => downloadAndWhatsApp(reportStudent)}
+            disabled={generating}
+            style={{ ...S.btn("#25d366") }}
+          >
+            {generating ? "⏳ Generating..." : "📥 Download PDF & WhatsApp"}
+          </button>
+        </div>
 
         <div id="report-card" style={{ background:"#fff", borderRadius:20, overflow:"hidden", boxShadow:"0 8px 40px #0000001a", fontFamily:"Georgia, serif" }}>
           <div style={{ background:"linear-gradient(135deg,#1e3a8a,#6366f1)", padding:"32px 32px 24px", textAlign:"center" }}>
@@ -583,9 +623,7 @@ function ViewResults({ students, classes, terms }) {
             <h1 style={{ margin:0, fontSize:24, fontWeight:900, color:"#fff", letterSpacing:"0.1em", textTransform:"uppercase" }}>Career Builder Schools</h1>
             <div style={{ width:50, height:3, background:"#fbbf24", margin:"10px auto 8px", borderRadius:2 }} />
             <h2 style={{ margin:0, fontSize:14, color:"#fbbf24", letterSpacing:"0.15em", textTransform:"uppercase" }}>Academic Report Card</h2>
-            <div style={{ color:"#c7d2fe", fontSize:13, marginTop:8 }}>
-              {term ? `${term.name}` : ""} • Session {terms.find(t=>t.id===selectedTerm) ? "—" : ""}
-            </div>
+            <div style={{ color:"#c7d2fe", fontSize:13, marginTop:8 }}>{term?.name} • {cls?.name} {cls?.arm||""}</div>
           </div>
 
           <div style={{ padding:"20px 32px", background:"#f8faff", borderBottom:"2px solid #e0e7ff", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
@@ -609,7 +647,7 @@ function ViewResults({ students, classes, terms }) {
               <thead>
                 <tr style={{ background:"linear-gradient(135deg,#1e3a8a,#4338ca)" }}>
                   {["Subject","C.A (40%)","Exam (60%)","Total","Grade","Remark"].map(h => (
-                    <th key={h} style={{ padding:"10px 8px", color:"#fff", textAlign:"center", fontWeight:700, fontSize:11, textTransform:"uppercase", letterSpacing:"0.05em" }}>{h}</th>
+                    <th key={h} style={{ padding:"10px 8px", color:"#fff", textAlign:"center", fontWeight:700, fontSize:11, textTransform:"uppercase" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -635,7 +673,7 @@ function ViewResults({ students, classes, terms }) {
             {[
               ["Total Marks", totalMarks, "#6366f1"],
               ["Average", `${avg}%`, "#0ea5e9"],
-              ["Position", pos ? `${getPosition(pos)} of ${classStudents.length}` : "—", "#f59e0b"],
+              ["Position", pos ? `${ordinal(pos)} of ${classStudents.length}` : "—", "#f59e0b"],
               ["Attendance", att ? `${att.days_present}/${att.total_days||"—"} days` : "—", "#10b981"],
             ].map(([l,v,col]) => (
               <div key={l} style={{ background:`${col}10`, border:`1.5px solid ${col}30`, borderRadius:10, padding:"12px", textAlign:"center" }}>
@@ -674,7 +712,7 @@ function ViewResults({ students, classes, terms }) {
           </div>
 
           <div style={{ background:"linear-gradient(135deg,#1e3a8a,#3730a3)", padding:"12px 32px", textAlign:"center", fontFamily:"sans-serif" }}>
-            <p style={{ margin:0, color:"#c7d2fe", fontSize:11 }}>Career Builder Schools • Official Academic Report Card</p>
+            <p style={{ margin:0, color:"#c7d2fe", fontSize:11 }}>Career Builder Schools • Official Academic Report Card • {term?.name}</p>
           </div>
         </div>
         <style>{`@media print { body * { visibility:hidden; } #report-card, #report-card * { visibility:visible; } #report-card { position:fixed; top:0; left:0; width:100%; box-shadow:none; border-radius:0; margin:0; } }`}</style>
@@ -711,11 +749,12 @@ function ViewResults({ students, classes, terms }) {
         const total = sRes.reduce((a,r) => a+r.total, 0);
         const avg = sRes.length ? Math.round(total/sRes.length) : 0;
         const g = getGrade(avg);
+        const pos = getPosition(s.id);
         return (
           <div key={s.id} style={{ ...S.card, display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 16px", marginBottom:8 }}>
             <div>
               <div style={{ fontWeight:700, color:"#1e293b" }}>{s.full_name}</div>
-              <div style={{ fontSize:12, color:"#64748b" }}>Avg: {avg}% • <span style={{ color:g.col, fontWeight:700 }}>{g.g}</span> • Position: {getPosition(getPosition(s.id))} of {classStudents.length}</div>
+              <div style={{ fontSize:12, color:"#64748b" }}>Avg: {avg}% • <span style={{ color:g.col, fontWeight:700 }}>{g.g}</span> • {ordinal(pos)} of {classStudents.length}</div>
             </div>
             <button onClick={()=>setReportStudent(s)} style={S.btn("#8b5cf6")}>View Report</button>
           </div>
@@ -725,9 +764,7 @@ function ViewResults({ students, classes, terms }) {
   );
 }
 
-// ─── TEACHER DASHBOARD ────────────────────────────────────
 function TeacherDash({ user, onLogout }) {
-  const [tab, setTab] = useState("enter");
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
   const [terms, setTerms] = useState([]);
@@ -776,7 +813,9 @@ function TeacherDash({ user, onLogout }) {
     r.forEach(res => { sc[res.subject_name] = { ca: res.ca_score, exam: res.exam_score, id: res.id }; });
     setScores(sc);
     if (a[0]) setAttendance({ days_present: a[0].days_present, total_days: a[0].total_days, id: a[0].id });
+    else setAttendance({ days_present:"", total_days:"" });
     if (rem[0]) setRemarks({ teacher_remark: rem[0].teacher_remark||"", principal_remark: rem[0].principal_remark||"", id: rem[0].id });
+    else setRemarks({ teacher_remark:"", principal_remark:"" });
   };
 
   const saveResults = async () => {
@@ -791,13 +830,11 @@ function TeacherDash({ user, onLogout }) {
         await db.post("results", { student_id: selectedStudent.id, term_id: selectedTerm, subject_name: sub, ca_score: Number(sc.ca)||0, exam_score: Number(sc.exam)||0 });
       }
     }
-    // Save attendance
     if (attendance.id) {
       await db.patch("attendance", attendance.id, { days_present: Number(attendance.days_present)||0, total_days: Number(attendance.total_days)||0 });
     } else {
       await db.post("attendance", { student_id: selectedStudent.id, term_id: selectedTerm, days_present: Number(attendance.days_present)||0, total_days: Number(attendance.total_days)||0 });
     }
-    // Save remarks
     if (remarks.id) {
       await db.patch("remarks", remarks.id, { teacher_remark: remarks.teacher_remark, principal_remark: remarks.principal_remark });
     } else {
@@ -893,7 +930,7 @@ function TeacherDash({ user, onLogout }) {
               <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>💬 Remarks</div>
               <div style={{ marginBottom:12 }}>
                 <label style={S.label}>Class Teacher's Remark</label>
-                <textarea style={{ ...S.input, height:70, resize:"vertical" }} value={remarks.teacher_remark} onChange={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks about this student..." />
+                <textarea style={{ ...S.input, height:70, resize:"vertical" }} value={remarks.teacher_remark} onChange={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks..." />
               </div>
               <div style={{ marginBottom:16 }}>
                 <label style={S.label}>Principal's Remark</label>
@@ -913,15 +950,9 @@ function TeacherDash({ user, onLogout }) {
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
-
-  const handleLogin = (u) => setUser(u);
-  const handleLogout = () => setUser(null);
-
-  if (!user) return <Login onLogin={handleLogin} />;
-  if (user.role === "principal") return <PrincipalDash user={user} onLogout={handleLogout} />;
-  if (user.role === "teacher") return <TeacherDash user={user} onLogout={handleLogout} />;
-  return <div>Unknown role</div>;
-      }
+  return !user ? <Login onLogin={setUser} /> :
+    user.role === "principal" ? <PrincipalDash user={user} onLogout={()=>setUser(null)} /> :
+    <TeacherDash user={user} onLogout={()=>setUser(null)} />;
+}
