@@ -55,10 +55,10 @@ const NIGERIAN_SUBJECTS = {
 };
 
 const MESSAGE_TEMPLATES = {
-  "School Resumption": "Dear Parent/Guardian, this is to inform you that school resumes on [DATE]. Please ensure your ward reports on time. Thank you. — Career Builder Schools",
-  "Fee Payment Reminder": "Dear Parent/Guardian, this is a reminder that school fees for [TERM] are due. Please make payment on or before [DATE] to avoid any disruption. Thank you. — Career Builder Schools",
-  "PTA Meeting": "Dear Parent/Guardian, you are cordially invited to our PTA meeting scheduled for [DATE] at [TIME]. Your attendance is important. Thank you. — Career Builder Schools",
-  "Emergency Notice": "URGENT: Dear Parent/Guardian, please be informed that [MESSAGE]. Please contact the school immediately. Thank you. — Career Builder Schools",
+  "School Resumption": "Dear [PARENT], this is to inform you that school resumes on [DATE]. Please ensure your ward reports on time. Thank you. — Career Builder Schools",
+  "Fee Payment Reminder": "Dear [PARENT], this is a reminder that school fees for this term are due. Please make payment on or before [DATE] to avoid any disruption. Thank you. — Career Builder Schools",
+  "PTA Meeting": "Dear [PARENT], you are cordially invited to our PTA meeting scheduled for [DATE] at [TIME]. Your attendance is important. Thank you. — Career Builder Schools",
+  "Emergency Notice": "URGENT: Dear [PARENT], please be informed that [MESSAGE]. Please contact the school immediately. Thank you. — Career Builder Schools",
   "Custom Message": "",
 };
 
@@ -87,6 +87,241 @@ const S = {
   section: (col="#6366f1") => ({ display:"flex", alignItems:"center", gap:10, padding:"10px 16px", background:`${col}15`, borderRadius:10, marginBottom:20, borderLeft:`4px solid ${col}` }),
 };
 
+// ── PDF GENERATOR (pure jsPDF, no html2canvas) ──────────────
+const generateReportPDF = (student, cls, term, subjects, results, attendance, remarks, allStudents, allResults, allSubjects) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+      script.onload = () => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+        const W = 210;
+        let y = 0;
+
+        // Header background
+        doc.setFillColor(30, 58, 138);
+        doc.rect(0, 0, W, 50, "F");
+
+        // School name
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(20);
+        doc.setFont("helvetica", "bold");
+        doc.text("CAREER BUILDER SCHOOLS", W/2, 18, { align: "center" });
+
+        // Gold line
+        doc.setDrawColor(251, 191, 36);
+        doc.setLineWidth(1);
+        doc.line(70, 22, 140, 22);
+
+        // Subtitle
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "normal");
+        doc.text("ACADEMIC REPORT CARD", W/2, 30, { align: "center" });
+        doc.setFontSize(10);
+        doc.text(`${term?.name || ""} • ${cls?.name || ""} ${cls?.arm || ""}`, W/2, 38, { align: "center" });
+
+        y = 58;
+
+        // Student info box
+        doc.setFillColor(248, 250, 255);
+        doc.rect(10, y-6, W-20, 38, "F");
+        doc.setDrawColor(200, 210, 240);
+        doc.rect(10, y-6, W-20, 38, "S");
+
+        doc.setTextColor(99, 102, 241);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        const infoLabels = ["STUDENT NAME","ADMISSION NO","CLASS","GENDER","DATE OF BIRTH","PARENT/GUARDIAN"];
+        const infoValues = [
+          student.full_name,
+          student.admission_number || "—",
+          `${cls?.name || ""} ${cls?.arm || ""}`,
+          student.gender || "—",
+          student.date_of_birth || "—",
+          student.guardian_name || "—",
+        ];
+        infoLabels.forEach((label, i) => {
+          const col = i % 3;
+          const row = Math.floor(i / 3);
+          const x = 14 + col * 65;
+          const iy = y + row * 16;
+          doc.setTextColor(99, 102, 241);
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "bold");
+          doc.text(label, x, iy);
+          doc.setTextColor(30, 41, 59);
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "bold");
+          doc.text(String(infoValues[i]), x, iy + 6);
+        });
+
+        y += 42;
+
+        // Results table header
+        doc.setFillColor(30, 58, 138);
+        doc.rect(10, y, W-20, 10, "F");
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        const cols = [10, 70, 95, 120, 140, 162, 185];
+        const headers = ["SUBJECT", "C.A (40%)", "EXAM (60%)", "TOTAL", "%", "GRADE", "REMARK"];
+        headers.forEach((h, i) => doc.text(h, cols[i] + 2, y + 7));
+        y += 10;
+
+        // Results rows
+        const subjectResults = subjects.map(sub => {
+          const r = results.find(r => r.subject_name === sub);
+          const ca = r?.ca_score || 0;
+          const exam = r?.exam_score || 0;
+          const total = ca + exam;
+          const pct = Math.round(total);
+          return { sub, ca, exam, total, pct, ...getGrade(pct) };
+        });
+
+        subjectResults.forEach((r, i) => {
+          if (y > 250) { doc.addPage(); y = 20; }
+          doc.setFillColor(i % 2 === 0 ? 255 : 248, i % 2 === 0 ? 255 : 250, i % 2 === 0 ? 255 : 255);
+          doc.rect(10, y, W-20, 9, "F");
+          doc.setTextColor(30, 41, 59);
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "normal");
+          doc.text(r.sub, cols[0] + 2, y + 6);
+          doc.text(String(r.ca), cols[1] + 6, y + 6, { align: "center" });
+          doc.text(String(r.exam), cols[2] + 6, y + 6, { align: "center" });
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(r.col ? parseInt(r.col.slice(1,3),16) : 0, r.col ? parseInt(r.col.slice(3,5),16) : 0, r.col ? parseInt(r.col.slice(5,7),16) : 0);
+          doc.text(String(r.total), cols[3] + 6, y + 6, { align: "center" });
+          doc.setTextColor(30, 41, 59);
+          doc.setFont("helvetica", "normal");
+          doc.text(`${r.pct}%`, cols[4] + 4, y + 6, { align: "center" });
+          doc.setFont("helvetica", "bold");
+          doc.text(r.g, cols[5] + 6, y + 6, { align: "center" });
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7);
+          doc.text(r.r, cols[6] + 2, y + 6);
+          y += 9;
+        });
+
+        // Summary boxes
+        y += 6;
+        const totalMarks = subjectResults.reduce((a, r) => a + r.total, 0);
+        const avg = subjectResults.length ? Math.round(totalMarks / subjectResults.length) : 0;
+        const overall = getGrade(avg);
+
+        // Calculate position
+        const classStudentIds = allStudents.map(s => s.id);
+        const getStudentTotal = (sid) => {
+          return subjects.reduce((a, sub) => {
+            const r = allResults.find(r => r.student_id === sid && r.subject_name === sub);
+            return a + (r?.ca_score || 0) + (r?.exam_score || 0);
+          }, 0);
+        };
+        const ranked = [...classStudentIds].sort((a, b) => getStudentTotal(b) - getStudentTotal(a));
+        const pos = ranked.indexOf(student.id) + 1;
+        const att = attendance;
+
+        const summaryItems = [
+          ["Total Marks", String(totalMarks), "#6366f1"],
+          ["Average", `${avg}%`, "#0ea5e9"],
+          ["Position", pos ? ordinal(pos) + " of " + allStudents.length : "—", "#f59e0b"],
+          ["Attendance", att ? `${att.days_present}/${att.total_days || "—"}` : "—", "#10b981"],
+          ["Overall Grade", overall.g, overall.col],
+        ];
+
+        const boxW = (W - 20) / summaryItems.length;
+        summaryItems.forEach((item, i) => {
+          const bx = 10 + i * boxW;
+          const col = item[2];
+          const r = parseInt(col.slice(1,3),16);
+          const g2 = parseInt(col.slice(3,5),16);
+          const b = parseInt(col.slice(5,7),16);
+          doc.setFillColor(r, g2, b, 0.1);
+          doc.setDrawColor(r, g2, b);
+          doc.roundedRect(bx, y, boxW - 2, 18, 2, 2, "FD");
+          doc.setTextColor(r, g2, b);
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "bold");
+          doc.text(item[0], bx + boxW/2 - 1, y + 7, { align: "center" });
+          doc.setFontSize(11);
+          doc.text(item[1], bx + boxW/2 - 1, y + 15, { align: "center" });
+        });
+        y += 24;
+
+        // Remarks
+        if (remarks?.teacher_remark) {
+          doc.setFillColor(240, 253, 244);
+          doc.rect(10, y, W-20, 18, "F");
+          doc.setDrawColor(16, 185, 129);
+          doc.setLineWidth(0.5);
+          doc.line(10, y, 10, y+18);
+          doc.setTextColor(16, 185, 129);
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "bold");
+          doc.text("CLASS TEACHER'S REMARKS", 14, y + 6);
+          doc.setTextColor(55, 65, 81);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          const lines = doc.splitTextToSize(remarks.teacher_remark, W-30);
+          doc.text(lines[0], 14, y + 13);
+          y += 22;
+        }
+
+        if (remarks?.principal_remark) {
+          doc.setFillColor(239, 246, 255);
+          doc.rect(10, y, W-20, 18, "F");
+          doc.setDrawColor(59, 130, 246);
+          doc.line(10, y, 10, y+18);
+          doc.setTextColor(59, 130, 246);
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "bold");
+          doc.text("PRINCIPAL'S REMARKS", 14, y + 6);
+          doc.setTextColor(55, 65, 81);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8);
+          const lines = doc.splitTextToSize(remarks.principal_remark, W-30);
+          doc.text(lines[0], 14, y + 13);
+          y += 22;
+        }
+
+        // Signature lines
+        y += 4;
+        const sigs = ["Class Teacher", "Principal", "Parent/Guardian"];
+        sigs.forEach((sig, i) => {
+          const sx = 14 + i * 62;
+          doc.setDrawColor(200, 210, 220);
+          doc.line(sx, y + 12, sx + 50, y + 12);
+          doc.setTextColor(148, 163, 184);
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "normal");
+          doc.text(sig, sx + 25, y + 18, { align: "center" });
+        });
+        y += 24;
+
+        // Footer
+        doc.setFillColor(30, 58, 138);
+        doc.rect(0, 282, W, 15, "F");
+        doc.setTextColor(199, 210, 254);
+        doc.setFontSize(8);
+        doc.text("Career Builder Schools • Official Academic Report Card • " + (term?.name || ""), W/2, 291, { align: "center" });
+
+        // Save
+        const fileName = `${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`;
+        doc.save(fileName);
+        resolve(fileName);
+      };
+      script.onerror = () => reject(new Error("Failed to load jsPDF"));
+      if (!window.jspdf) {
+        document.head.appendChild(script);
+      } else {
+        script.onload();
+      }
+    } catch(e) {
+      reject(e);
+    }
+  });
+};
+
 function Login({ onLogin }) {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
@@ -103,13 +338,9 @@ function Login({ onLogin }) {
       const data = await res.json();
       if (!data.length) { setErr("User not found"); setLoading(false); return; }
       const user = data[0];
-      if (pass !== "school1234") {
-        setErr("Incorrect password"); setLoading(false); return;
-      }
+      if (pass !== "school1234") { setErr("Incorrect password"); setLoading(false); return; }
       onLogin(user);
-    } catch(e) {
-      setErr("Connection error. Try again.");
-    }
+    } catch(e) { setErr("Connection error. Try again."); }
     setLoading(false);
   };
 
@@ -244,72 +475,56 @@ function Messages({ students, classes }) {
   const [sendTo, setSendTo] = useState("all");
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedStudent, setSelectedStudent] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(0);
-  const [total, setTotal] = useState(0);
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [recipients, setRecipients] = useState([]);
-  const [phase, setPhase] = useState("compose"); // compose | sending | done
+  const [phase, setPhase] = useState("compose");
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [sent, setSent] = useState(0);
+
+  useEffect(() => { setMessage(MESSAGE_TEMPLATES[msgType] || ""); }, [msgType]);
 
   useEffect(() => {
-    setMessage(MESSAGE_TEMPLATES[msgType] || "");
-  }, [msgType]);
-
-  useEffect(() => {
-    // Build recipients list
     let list = [];
-    if (sendTo === "all") {
-      list = students.filter(s => s.guardian_phone);
-    } else if (sendTo === "class" && selectedClass) {
-      list = students.filter(s => s.class_id === selectedClass && s.guardian_phone);
-    } else if (sendTo === "individual" && selectedStudent) {
+    if (sendTo === "all") list = students.filter(s => s.guardian_phone);
+    else if (sendTo === "class" && selectedClass) list = students.filter(s => s.class_id === selectedClass && s.guardian_phone);
+    else if (sendTo === "individual" && selectedStudent) {
       const s = students.find(s => s.id === selectedStudent);
       if (s?.guardian_phone) list = [s];
     }
     setRecipients(list);
   }, [sendTo, selectedClass, selectedStudent, students]);
 
-  const startSending = () => {
-    if (!message.trim()) return alert("Please type a message");
-    if (!recipients.length) return alert("No recipients with WhatsApp numbers found");
-    setPhase("sending");
-    setCurrentIndex(0);
-    setSent(0);
-    setTotal(recipients.length);
-    sendNext(0, recipients);
-  };
-
-  const sendNext = (index, list) => {
-    if (index >= list.length) {
-      setPhase("done");
-      return;
-    }
-    const student = list[index];
+  const sendNext = (index) => {
+    const student = recipients[index];
     const phone = student.guardian_phone?.replace(/\D/g,"");
-    const personalMsg = message
-      .replace("[PARENT]", student.guardian_name || "Parent")
-      .replace("[STUDENT]", student.full_name);
-    const url = `https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(personalMsg)}`;
-    window.open(url, "_blank");
+    const personalMsg = message.replace("[PARENT]", student.guardian_name||"Parent").replace("[STUDENT]", student.full_name);
+    window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(personalMsg)}`, "_blank");
     setCurrentIndex(index);
     setSent(index + 1);
   };
 
-  const handleNext = () => {
-    const nextIndex = currentIndex + 1;
-    if (nextIndex >= recipients.length) {
-      setPhase("done");
-    } else {
-      setCurrentIndex(nextIndex);
-      sendNext(nextIndex, recipients);
-    }
+  const startSending = () => {
+    if (!message.trim()) return alert("Please type a message");
+    if (!recipients.length) return alert("No recipients found");
+    setPhase("sending");
+    sendNext(0);
   };
 
-  const reset = () => {
-    setPhase("compose");
-    setSent(0);
-    setCurrentIndex(0);
+  const handleNext = () => {
+    const next = currentIndex + 1;
+    if (next >= recipients.length) { setPhase("done"); }
+    else { sendNext(next); }
   };
+
+  const reset = () => { setPhase("compose"); setSent(0); setCurrentIndex(0); };
+
+  if (phase === "done") return (
+    <div style={{ textAlign:"center", padding:40 }}>
+      <div style={{ fontSize:64, marginBottom:16 }}>🎉</div>
+      <h2 style={{ color:"#1e293b", marginBottom:8 }}>All Messages Sent!</h2>
+      <p style={{ color:"#64748b", marginBottom:24 }}>Successfully sent to {sent} parents</p>
+      <button onClick={reset} style={{ ...S.btn("#6366f1"), padding:"12px 28px" }}>Send Another Message</button>
+    </div>
+  );
 
   if (phase === "sending") {
     const current = recipients[currentIndex];
@@ -317,111 +532,54 @@ function Messages({ students, classes }) {
     return (
       <div>
         <div style={S.section("#25d366")}>
-          <span>📨</span>
-          <span style={{ fontWeight:800, color:"#25d366" }}>Sending Messages — {sent} of {total}</span>
+          <span>📨</span><span style={{ fontWeight:800, color:"#25d366" }}>Sending — {sent} of {recipients.length}</span>
         </div>
-
-        {/* Progress bar */}
-        <div style={{ background:"#e2e8f0", borderRadius:10, height:12, marginBottom:20, overflow:"hidden" }}>
-          <div style={{ background:"#25d366", height:"100%", width:`${(sent/total)*100}%`, borderRadius:10, transition:"width 0.3s" }} />
+        <div style={{ background:"#e2e8f0", borderRadius:10, height:10, marginBottom:20 }}>
+          <div style={{ background:"#25d366", height:"100%", width:`${(sent/recipients.length)*100}%`, borderRadius:10, transition:"width 0.3s" }} />
         </div>
-
-        <div style={{ ...S.card, textAlign:"center", padding:32 }}>
-          <div style={{ fontSize:48, marginBottom:12 }}>📱</div>
-          <div style={{ fontSize:18, fontWeight:800, color:"#1e293b", marginBottom:6 }}>{current?.full_name}</div>
-          <div style={{ fontSize:14, color:"#64748b", marginBottom:4 }}>Guardian: {current?.guardian_name}</div>
-          <div style={{ fontSize:14, color:"#64748b", marginBottom:4 }}>Class: {cls?.name} {cls?.arm||""}</div>
-          <div style={{ fontSize:16, fontWeight:700, color:"#25d366", marginBottom:20 }}>📱 {current?.guardian_phone}</div>
-          <p style={{ color:"#64748b", fontSize:13, marginBottom:24, background:"#f8fafc", padding:12, borderRadius:10, textAlign:"left" }}>{message}</p>
-          <p style={{ color:"#94a3b8", fontSize:12, marginBottom:16 }}>WhatsApp has opened. After sending, tap the button below to continue to the next parent.</p>
+        <div style={{ ...S.card, textAlign:"center", padding:28 }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>📱</div>
+          <div style={{ fontSize:18, fontWeight:800, color:"#1e293b" }}>{current?.full_name}</div>
+          <div style={{ fontSize:13, color:"#64748b", marginBottom:4 }}>Guardian: {current?.guardian_name} • {cls?.name} {cls?.arm||""}</div>
+          <div style={{ fontSize:15, fontWeight:700, color:"#25d366", marginBottom:16 }}>{current?.guardian_phone}</div>
+          <p style={{ color:"#94a3b8", fontSize:12, marginBottom:20 }}>WhatsApp has opened. After sending, tap Next.</p>
           <div style={{ display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap" }}>
-            <button onClick={handleNext} style={{ ...S.btn("#25d366"), padding:"12px 28px", fontSize:15 }}>
-              {currentIndex + 1 >= total ? "✅ Done" : "Next Parent →"}
-            </button>
-            <button onClick={()=>sendNext(currentIndex, recipients)} style={{ ...S.btn("#6366f1") }}>
-              🔄 Resend This
-            </button>
-            <button onClick={reset} style={{ ...S.btn("#64748b") }}>Cancel</button>
+            <button onClick={handleNext} style={S.btn("#25d366")}>{currentIndex+1 >= recipients.length ? "✅ Done" : "Next →"}</button>
+            <button onClick={()=>sendNext(currentIndex)} style={S.btn("#6366f1")}>🔄 Resend</button>
+            <button onClick={reset} style={S.btn("#64748b")}>Cancel</button>
           </div>
         </div>
-
-        {/* Recipients list */}
-        <div style={S.card}>
-          <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>All Recipients</div>
-          {recipients.map((r, i) => (
-            <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid #f1f5f9" }}>
-              <div style={{ width:24, height:24, borderRadius:"50%", background: i < sent ? "#10b981" : i === currentIndex ? "#f59e0b" : "#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, color:"#fff", fontWeight:800, flexShrink:0 }}>
-                {i < sent ? "✓" : i + 1}
-              </div>
-              <div>
-                <div style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{r.full_name}</div>
-                <div style={{ fontSize:12, color:"#64748b" }}>{r.guardian_name} • {r.guardian_phone}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (phase === "done") {
-    return (
-      <div style={{ textAlign:"center", padding:40 }}>
-        <div style={{ fontSize:64, marginBottom:16 }}>🎉</div>
-        <h2 style={{ color:"#1e293b", marginBottom:8 }}>All Messages Sent!</h2>
-        <p style={{ color:"#64748b", marginBottom:24 }}>Successfully sent to {total} parents via WhatsApp</p>
-        <button onClick={reset} style={{ ...S.btn("#6366f1"), padding:"12px 28px" }}>Send Another Message</button>
       </div>
     );
   }
 
   return (
     <div>
-      <div style={S.section("#25d366")}>
-        <span>📨</span>
-        <span style={{ fontWeight:800, color:"#25d366" }}>Send Message to Parents</span>
-      </div>
-
+      <div style={S.section("#25d366")}><span>📨</span><span style={{ fontWeight:800, color:"#25d366" }}>Send Message to Parents</span></div>
       <div style={S.card}>
-        {/* Message Type */}
         <div style={{ marginBottom:16 }}>
           <label style={S.label}>Message Type</label>
           <select style={S.input} value={msgType} onChange={e=>setMsgType(e.target.value)}>
             {Object.keys(MESSAGE_TEMPLATES).map(t => <option key={t}>{t}</option>)}
           </select>
         </div>
-
-        {/* Message Body */}
         <div style={{ marginBottom:16 }}>
           <label style={S.label}>Message</label>
-          <textarea
-            style={{ ...S.input, height:120, resize:"vertical" }}
-            value={message}
-            onChange={e=>setMessage(e.target.value)}
-            placeholder="Type your message here..."
-          />
-          <div style={{ fontSize:11, color:"#94a3b8", marginTop:4 }}>
-            Tip: Use [PARENT] for guardian name, [STUDENT] for student name — they'll be replaced automatically
-          </div>
+          <textarea style={{ ...S.input, height:120, resize:"vertical" }} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Type your message..." />
+          <div style={{ fontSize:11, color:"#94a3b8", marginTop:4 }}>Use [PARENT] for guardian name, [STUDENT] for student name</div>
         </div>
-
-        {/* Send To */}
         <div style={{ marginBottom:16 }}>
           <label style={S.label}>Send To</label>
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             {[
-              { id:"all", label:`All Parents (${students.filter(s=>s.guardian_phone).length})`, icon:"👥" },
-              { id:"class", label:"Specific Class", icon:"🏫" },
-              { id:"individual", label:"One Parent", icon:"👤" },
+              { id:"all", label:`All Parents (${students.filter(s=>s.guardian_phone).length})` },
+              { id:"class", label:"Specific Class" },
+              { id:"individual", label:"One Parent" },
             ].map(o => (
-              <button key={o.id} onClick={()=>setSendTo(o.id)} style={{ ...S.btn(sendTo===o.id?"#6366f1":"#e2e8f0"), color: sendTo===o.id?"#fff":"#475569", padding:"8px 14px", fontSize:13 }}>
-                {o.icon} {o.label}
-              </button>
+              <button key={o.id} onClick={()=>setSendTo(o.id)} style={{ ...S.btn(sendTo===o.id?"#6366f1":"#e2e8f0"), color:sendTo===o.id?"#fff":"#475569", padding:"8px 14px", fontSize:13 }}>{o.label}</button>
             ))}
           </div>
         </div>
-
-        {/* Class selector */}
         {sendTo === "class" && (
           <div style={{ marginBottom:16 }}>
             <label style={S.label}>Select Class</label>
@@ -431,60 +589,38 @@ function Messages({ students, classes }) {
             </select>
           </div>
         )}
-
-        {/* Individual selector */}
         {sendTo === "individual" && (
           <div style={{ marginBottom:16 }}>
             <label style={S.label}>Select Student</label>
             <select style={S.input} value={selectedStudent} onChange={e=>setSelectedStudent(e.target.value)}>
               <option value="">Choose student</option>
-              {students.filter(s=>s.guardian_phone).map(s => (
-                <option key={s.id} value={s.id}>{s.full_name} — {s.guardian_name}</option>
-              ))}
+              {students.filter(s=>s.guardian_phone).map(s => <option key={s.id} value={s.id}>{s.full_name} — {s.guardian_name}</option>)}
             </select>
           </div>
         )}
       </div>
 
-      {/* Recipients Preview */}
       {recipients.length > 0 && (
         <div style={S.card}>
-          <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>
-            👥 Recipients Preview ({recipients.length} parents)
-          </div>
+          <div style={{ fontWeight:800, color:"#1e293b", marginBottom:12 }}>👥 Recipients ({recipients.length})</div>
           {recipients.slice(0,5).map(r => {
             const cls = classes.find(c => c.id === r.class_id);
             return (
               <div key={r.id} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:"1px solid #f1f5f9" }}>
                 <div>
-                  <div style={{ fontSize:13, fontWeight:700, color:"#1e293b" }}>{r.full_name}</div>
+                  <div style={{ fontSize:13, fontWeight:700 }}>{r.full_name}</div>
                   <div style={{ fontSize:12, color:"#64748b" }}>{r.guardian_name} • {cls?.name} {cls?.arm||""}</div>
                 </div>
                 <div style={{ fontSize:13, color:"#25d366", fontWeight:600 }}>📱 {r.guardian_phone}</div>
               </div>
             );
           })}
-          {recipients.length > 5 && (
-            <div style={{ fontSize:12, color:"#94a3b8", textAlign:"center", paddingTop:8 }}>
-              +{recipients.length - 5} more parents
-            </div>
-          )}
+          {recipients.length > 5 && <div style={{ fontSize:12, color:"#94a3b8", textAlign:"center", paddingTop:8 }}>+{recipients.length-5} more</div>}
         </div>
       )}
 
-      {recipients.length === 0 && sendTo !== "compose" && (
-        <div style={{ ...S.card, textAlign:"center", color:"#94a3b8", padding:24 }}>
-          ⚠️ No parents with WhatsApp numbers found for this selection
-        </div>
-      )}
-
-      {/* Send Button */}
-      <button
-        onClick={startSending}
-        disabled={!recipients.length || !message.trim()}
-        style={{ ...S.btn("#25d366"), width:"100%", padding:"16px", fontSize:16, opacity: !recipients.length || !message.trim() ? 0.5 : 1 }}
-      >
-        💬 Send to {recipients.length} Parent{recipients.length !== 1 ? "s" : ""} via WhatsApp
+      <button onClick={startSending} disabled={!recipients.length || !message.trim()} style={{ ...S.btn("#25d366"), width:"100%", padding:"16px", fontSize:16, opacity:!recipients.length||!message.trim()?0.5:1 }}>
+        💬 Send to {recipients.length} Parent{recipients.length!==1?"s":""} via WhatsApp
       </button>
     </div>
   );
@@ -509,26 +645,19 @@ function ManageStudents({ students, classes, reload, schoolId }) {
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <div style={S.section()}>
-          <span>👨‍🎓</span><span style={{ fontWeight:800, color:"#6366f1" }}>Students ({students.length})</span>
-        </div>
+        <div style={S.section()}><span>👨‍🎓</span><span style={{ fontWeight:800, color:"#6366f1" }}>Students ({students.length})</span></div>
         <button onClick={() => setAdding(!adding)} style={S.btn()}>{adding ? "Cancel" : "+ Add Student"}</button>
       </div>
-
       {adding && (
         <div style={S.card}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
             {[["full_name","Full Name"],["admission_number","Admission No"],["guardian_name","Guardian Name"],["guardian_phone","Guardian WhatsApp"]].map(([k,l]) => (
-              <div key={k}>
-                <label style={S.label}>{l}</label>
-                <input style={S.input} value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} />
-              </div>
+              <div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))} /></div>
             ))}
             <div>
               <label style={S.label}>Gender</label>
               <select style={S.input} value={form.gender} onChange={e=>setForm(p=>({...p,gender:e.target.value}))}>
-                <option value="">Select</option>
-                <option>Male</option><option>Female</option>
+                <option value="">Select</option><option>Male</option><option>Female</option>
               </select>
             </div>
             <div>
@@ -546,16 +675,14 @@ function ManageStudents({ students, classes, reload, schoolId }) {
           <button onClick={save} disabled={saving} style={{ ...S.btn("#10b981"), marginTop:16 }}>{saving?"Saving...":"Save Student"}</button>
         </div>
       )}
-
       <input style={{ ...S.input, marginBottom:12 }} placeholder="🔍 Search students..." value={search} onChange={e=>setSearch(e.target.value)} />
-
       {filtered.map(s => {
         const cls = classes.find(c => c.id === s.class_id);
         return (
           <div key={s.id} style={{ ...S.card, display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 16px", marginBottom:8 }}>
             <div>
               <div style={{ fontWeight:700, color:"#1e293b" }}>{s.full_name}</div>
-              <div style={{ fontSize:12, color:"#64748b" }}>{cls ? `${cls.name} ${cls.arm||""}` : "No class"} • {s.admission_number || "No ID"}</div>
+              <div style={{ fontSize:12, color:"#64748b" }}>{cls ? `${cls.name} ${cls.arm||""}` : "No class"} • {s.admission_number||"No ID"}</div>
               <div style={{ fontSize:12, color:"#94a3b8" }}>👨‍👩‍👧 {s.guardian_name} • 📱 {s.guardian_phone}</div>
             </div>
             <button onClick={async()=>{if(window.confirm("Delete student?")){ await db.delete("students",s.id); reload();}}} style={{ background:"#fee2e2", border:"none", borderRadius:8, color:"#ef4444", padding:"6px 12px", cursor:"pointer", fontSize:12, fontWeight:700 }}>Delete</button>
@@ -580,12 +707,9 @@ function ManageClasses({ classes, reload, schoolId }) {
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <div style={S.section("#0ea5e9")}>
-          <span>🏫</span><span style={{ fontWeight:800, color:"#0ea5e9" }}>Classes ({classes.length})</span>
-        </div>
+        <div style={S.section("#0ea5e9")}><span>🏫</span><span style={{ fontWeight:800, color:"#0ea5e9" }}>Classes ({classes.length})</span></div>
         <button onClick={() => setAdding(!adding)} style={S.btn("#0ea5e9")}>{adding?"Cancel":"+ Add Class"}</button>
       </div>
-
       {adding && (
         <div style={S.card}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
@@ -597,7 +721,7 @@ function ManageClasses({ classes, reload, schoolId }) {
               </select>
             </div>
             <div>
-              <label style={S.label}>Arm (optional)</label>
+              <label style={S.label}>Arm</label>
               <select style={S.input} value={form.arm} onChange={e=>setForm(p=>({...p,arm:e.target.value}))}>
                 <option value="">None</option>
                 {["A","B","C","D"].map(a => <option key={a}>{a}</option>)}
@@ -614,7 +738,6 @@ function ManageClasses({ classes, reload, schoolId }) {
           <button onClick={save} style={{ ...S.btn("#0ea5e9"), marginTop:16 }}>Save Class</button>
         </div>
       )}
-
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
         {classes.map(c => (
           <div key={c.id} style={{ ...S.card, padding:"14px 16px", marginBottom:0 }}>
@@ -643,29 +766,19 @@ function ManageTeachers({ teachers, classes, reload, schoolId }) {
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <div style={S.section("#10b981")}>
-          <span>👩‍🏫</span><span style={{ fontWeight:800, color:"#10b981" }}>Teachers ({teachers.length})</span>
-        </div>
+        <div style={S.section("#10b981")}><span>👩‍🏫</span><span style={{ fontWeight:800, color:"#10b981" }}>Teachers ({teachers.length})</span></div>
         <button onClick={() => setAdding(!adding)} style={S.btn("#10b981")}>{adding?"Cancel":"+ Add Teacher"}</button>
       </div>
-
       {adding && (
         <div style={S.card}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div>
-              <label style={S.label}>Full Name</label>
-              <input style={S.input} value={form.full_name} onChange={e=>setForm(p=>({...p,full_name:e.target.value}))} placeholder="Teacher's name" />
-            </div>
-            <div>
-              <label style={S.label}>Email</label>
-              <input style={S.input} value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="teacher@school.com" type="email" />
-            </div>
+            <div><label style={S.label}>Full Name</label><input style={S.input} value={form.full_name} onChange={e=>setForm(p=>({...p,full_name:e.target.value}))} placeholder="Teacher's name" /></div>
+            <div><label style={S.label}>Email</label><input style={S.input} value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="teacher@school.com" type="email" /></div>
           </div>
           <p style={{ fontSize:12, color:"#94a3b8", margin:"12px 0 0" }}>Default password: <strong>school1234</strong></p>
           <button onClick={save} disabled={saving} style={{ ...S.btn("#10b981"), marginTop:12 }}>{saving?"Saving...":"Save Teacher"}</button>
         </div>
       )}
-
       {teachers.map(t => (
         <div key={t.id} style={{ ...S.card, display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 16px", marginBottom:8 }}>
           <div>
@@ -707,9 +820,7 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
 
   return (
     <div>
-      <div style={S.section("#f59e0b")}>
-        <span>📅</span><span style={{ fontWeight:800, color:"#f59e0b" }}>Academic Sessions & Terms</span>
-      </div>
+      <div style={S.section("#f59e0b")}><span>📅</span><span style={{ fontWeight:800, color:"#f59e0b" }}>Academic Sessions & Terms</span></div>
       <div style={{ display:"flex", gap:10, marginBottom:16 }}>
         <button onClick={()=>setAddSess(!addSess)} style={S.btn("#f59e0b")}>{addSess?"Cancel":"+ New Session"}</button>
         <button onClick={()=>setAddTerm(!addTerm)} style={S.btn("#6366f1")}>{addTerm?"Cancel":"+ New Term"}</button>
@@ -754,7 +865,7 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
         <div key={sess.id} style={S.card}>
           <div style={{ fontWeight:800, color:"#1e293b", fontSize:16, marginBottom:10 }}>📅 {sess.name}</div>
           {terms.filter(t => t.session_id === sess.id).map(t => (
-            <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", background: t.is_current?"#f0fdf4":"#f8fafc", borderRadius:10, marginBottom:6, border: t.is_current?"1.5px solid #10b981":"1.5px solid #e2e8f0" }}>
+            <div key={t.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", background:t.is_current?"#f0fdf4":"#f8fafc", borderRadius:10, marginBottom:6, border:t.is_current?"1.5px solid #10b981":"1.5px solid #e2e8f0" }}>
               <div>
                 <span style={{ fontWeight:700 }}>{t.name}</span>
                 {t.is_current && <span style={{ ...S.badge("#10b981"), marginLeft:8, fontSize:11 }}>CURRENT</span>}
@@ -800,67 +911,44 @@ function ViewResults({ students, classes, terms }) {
   const cls = classes.find(c => c.id === selectedClass);
   const subjects = cls ? (NIGERIAN_SUBJECTS[cls.name] || []) : [];
 
-  const getStudentResults = (studentId) => {
-    return subjects.map(sub => {
-      const r = results.find(r => r.student_id === studentId && r.subject_name === sub);
-      return { subject: sub, ca: r?.ca_score || 0, exam: r?.exam_score || 0, total: (r?.ca_score||0)+(r?.exam_score||0) };
-    });
-  };
+  const getStudentResults = (studentId) => subjects.map(sub => {
+    const r = results.find(r => r.student_id === studentId && r.subject_name === sub);
+    return { subject: sub, ca: r?.ca_score||0, exam: r?.exam_score||0, total: (r?.ca_score||0)+(r?.exam_score||0) };
+  });
 
   const getPosition = (studentId) => {
-    const totals = classStudents.map(s => ({
-      id: s.id,
-      total: getStudentResults(s.id).reduce((a,r) => a+r.total, 0)
-    })).sort((a,b) => b.total - a.total);
-    return totals.findIndex(t => t.id === studentId) + 1;
+    const totals = classStudents.map(s => ({ id:s.id, total:getStudentResults(s.id).reduce((a,r)=>a+r.total,0) })).sort((a,b)=>b.total-a.total);
+    return totals.findIndex(t=>t.id===studentId)+1;
   };
 
-  const downloadAndWhatsApp = async (student) => {
+  const handleGenerateAndSend = async (student) => {
     setGenerating(true);
     try {
-      const reportEl = document.getElementById("report-card");
-      if (!reportEl) { setGenerating(false); return; }
-      const html2canvas = window.html2canvas;
-      const jsPDF = window.jspdf?.jsPDF;
-      if (!html2canvas || !jsPDF) {
-        alert("PDF generator loading... please try again in a moment");
-        setGenerating(false); return;
-      }
-      const canvas = await html2canvas(reportEl, {
-        scale: 1,
-        useCORS: true,
-        backgroundColor: "#ffffff",
-        windowWidth: reportEl.scrollWidth,
-        windowHeight: reportEl.scrollHeight,
+      const cls2 = classes.find(c => c.id === student.class_id);
+      const term = terms.find(t => t.id === selectedTerm);
+      const subs = cls2 ? (NIGERIAN_SUBJECTS[cls2.name]||[]) : [];
+      const sResults = subs.map(sub => {
+        const r = results.find(r => r.student_id === student.id && r.subject_name === sub);
+        return { subject:sub, ca:r?.ca_score||0, exam:r?.exam_score||0, total:(r?.ca_score||0)+(r?.exam_score||0) };
       });
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const canvasRatio = canvas.height / canvas.width;
-      const imgHeight = pageWidth * canvasRatio;
+      const att = attendance.find(a => a.student_id === student.id);
+      const rem = remarks.find(r => r.student_id === student.id);
 
-      if (imgHeight <= pageHeight) {
-      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, imgHeight);
-      } else {
-       let position = 0;
-       let remaining = imgHeight;
-      while (remaining > 0) {
-    pdf.addImage(imgData, "PNG", 0, position, pageWidth, imgHeight);
-    remaining -= pageHeight;
-    position -= pageHeight;
-    if (remaining > 0) pdf.addPage();
-  }
-}
-      pdf.save(`${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`);
+      await generateReportPDF(
+        student, cls2, term, subs, results.filter(r=>r.student_id===student.id),
+        att, rem, classStudents,
+        results, subs
+      );
+
       setTimeout(() => {
         const phone = student.guardian_phone?.replace(/\D/g,"");
-        const term = terms.find(t=>t.id===selectedTerm);
-        const msg = `Dear ${student.guardian_name||"Parent"}, the report card for ${student.full_name} (${term?.name||""}) has been downloaded. Please check your files, print and sign.`;
+        const term2 = terms.find(t=>t.id===selectedTerm);
+        const msg = `Dear ${student.guardian_name||"Parent"}, please find attached the report card for ${student.full_name} - ${term2?.name||""} - Career Builder Schools. Please print and sign.`;
         window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(msg)}`, "_blank");
         setGenerating(false);
       }, 2000);
     } catch(e) {
-      alert("Error generating PDF. Please use Print instead.");
+      alert("Error generating PDF: " + e.message);
       setGenerating(false);
     }
   };
@@ -870,7 +958,7 @@ function ViewResults({ students, classes, terms }) {
     const att = attendance.find(a => a.student_id === reportStudent.id);
     const rem = remarks.find(r => r.student_id === reportStudent.id);
     const sResults = getStudentResults(reportStudent.id);
-    const totalMarks = sResults.reduce((a,r) => a+r.total, 0);
+    const totalMarks = sResults.reduce((a,r)=>a+r.total,0);
     const avg = sResults.length ? Math.round(totalMarks/sResults.length) : 0;
     const pos = getPosition(reportStudent.id);
     const overall = getGrade(avg);
@@ -880,12 +968,12 @@ function ViewResults({ students, classes, terms }) {
         <div style={{ display:"flex", gap:8, padding:"12px 0", flexWrap:"wrap" }}>
           <button onClick={()=>setReportStudent(null)} style={S.btn("#64748b")}>← Back</button>
           <button onClick={()=>window.print()} style={S.btn("#10b981")}>🖨 Print</button>
-          <button onClick={()=>downloadAndWhatsApp(reportStudent)} disabled={generating} style={S.btn("#25d366")}>
+          <button onClick={()=>handleGenerateAndSend(reportStudent)} disabled={generating} style={S.btn("#25d366")}>
             {generating ? "⏳ Generating..." : "📥 Download PDF & WhatsApp"}
           </button>
         </div>
 
-        <div id="report-card" style={{ background:"#fff", borderRadius:20, overflow:"hidden", boxShadow:"0 8px 40px #0000001a", fontFamily:"Georgia, serif" }}>
+        <div id="report-card" style={{ background:"#fff", borderRadius:20, overflow:"hidden", boxShadow:"0 8px 40px #0000001a", fontFamily:"Georgia,serif" }}>
           <div style={{ background:"linear-gradient(135deg,#1e3a8a,#6366f1)", padding:"32px 32px 24px", textAlign:"center" }}>
             <div style={{ fontSize:40, marginBottom:6 }}>🎓</div>
             <h1 style={{ margin:0, fontSize:24, fontWeight:900, color:"#fff", letterSpacing:"0.1em", textTransform:"uppercase" }}>Career Builder Schools</h1>
@@ -895,14 +983,7 @@ function ViewResults({ students, classes, terms }) {
           </div>
 
           <div style={{ padding:"20px 32px", background:"#f8faff", borderBottom:"2px solid #e0e7ff", display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:14 }}>
-            {[
-              ["Student Name", reportStudent.full_name],
-              ["Admission No", reportStudent.admission_number||"—"],
-              ["Class", `${cls?.name||""} ${cls?.arm||""}`],
-              ["Gender", reportStudent.gender||"—"],
-              ["Date of Birth", reportStudent.date_of_birth||"—"],
-              ["Parent/Guardian", reportStudent.guardian_name||"—"],
-            ].map(([l,v]) => (
+            {[["Student Name",reportStudent.full_name],["Admission No",reportStudent.admission_number||"—"],["Class",`${cls?.name||""} ${cls?.arm||""}`],["Gender",reportStudent.gender||"—"],["Date of Birth",reportStudent.date_of_birth||"—"],["Parent/Guardian",reportStudent.guardian_name||"—"]].map(([l,v]) => (
               <div key={l} style={{ borderLeft:"3px solid #6366f1", paddingLeft:10 }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#6366f1", textTransform:"uppercase", letterSpacing:"0.1em", fontFamily:"sans-serif" }}>{l}</div>
                 <div style={{ fontSize:14, fontWeight:700, color:"#1e293b", marginTop:2, fontFamily:"sans-serif" }}>{v}</div>
@@ -923,7 +1004,7 @@ function ViewResults({ students, classes, terms }) {
                 {sResults.map((r,i) => {
                   const g = getGrade(r.total);
                   return (
-                    <tr key={r.subject} style={{ background: i%2===0?"#fff":"#f8faff" }}>
+                    <tr key={r.subject} style={{ background:i%2===0?"#fff":"#f8faff" }}>
                       <td style={{ padding:"9px 8px", fontWeight:700, color:"#1e293b" }}>{r.subject}</td>
                       <td style={{ padding:"9px 8px", textAlign:"center", color:"#475569" }}>{r.ca}</td>
                       <td style={{ padding:"9px 8px", textAlign:"center", color:"#475569" }}>{r.exam}</td>
@@ -938,12 +1019,7 @@ function ViewResults({ students, classes, terms }) {
           </div>
 
           <div style={{ padding:"0 32px 20px", display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
-            {[
-              ["Total Marks", totalMarks, "#6366f1"],
-              ["Average", `${avg}%`, "#0ea5e9"],
-              ["Position", pos ? `${ordinal(pos)} of ${classStudents.length}` : "—", "#f59e0b"],
-              ["Attendance", att ? `${att.days_present}/${att.total_days||"—"} days` : "—", "#10b981"],
-            ].map(([l,v,col]) => (
+            {[["Total Marks",totalMarks,"#6366f1"],["Average",`${avg}%`,"#0ea5e9"],["Position",pos?`${ordinal(pos)} of ${classStudents.length}`:"—","#f59e0b"],["Attendance",att?`${att.days_present}/${att.total_days||"—"} days`:"—","#10b981"]].map(([l,v,col]) => (
               <div key={l} style={{ background:`${col}10`, border:`1.5px solid ${col}30`, borderRadius:10, padding:"12px", textAlign:"center" }}>
                 <div style={{ fontSize:10, fontWeight:700, color:col, textTransform:"uppercase", letterSpacing:"0.08em", fontFamily:"sans-serif" }}>{l}</div>
                 <div style={{ fontSize:18, fontWeight:900, color:col, marginTop:2, fontFamily:"sans-serif" }}>{v}</div>
@@ -951,7 +1027,7 @@ function ViewResults({ students, classes, terms }) {
             ))}
           </div>
 
-          {(rem?.teacher_remark || rem?.principal_remark) && (
+          {(rem?.teacher_remark||rem?.principal_remark) && (
             <div style={{ margin:"0 32px 20px", fontFamily:"sans-serif" }}>
               {rem?.teacher_remark && (
                 <div style={{ background:"#f0fdf4", borderRadius:10, padding:"12px 16px", borderLeft:"4px solid #10b981", marginBottom:10 }}>
@@ -990,9 +1066,7 @@ function ViewResults({ students, classes, terms }) {
 
   return (
     <div>
-      <div style={S.section("#8b5cf6")}>
-        <span>📋</span><span style={{ fontWeight:800, color:"#8b5cf6" }}>View & Generate Report Cards</span>
-      </div>
+      <div style={S.section("#8b5cf6")}><span>📋</span><span style={{ fontWeight:800, color:"#8b5cf6" }}>View & Generate Report Cards</span></div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
         <div>
           <label style={S.label}>Select Class</label>
@@ -1014,7 +1088,7 @@ function ViewResults({ students, classes, terms }) {
 
       {!loading && selectedClass && classStudents.map(s => {
         const sRes = getStudentResults(s.id);
-        const total = sRes.reduce((a,r) => a+r.total, 0);
+        const total = sRes.reduce((a,r)=>a+r.total,0);
         const avg = sRes.length ? Math.round(total/sRes.length) : 0;
         const g = getGrade(avg);
         const pos = getPosition(s.id);
@@ -1024,7 +1098,12 @@ function ViewResults({ students, classes, terms }) {
               <div style={{ fontWeight:700, color:"#1e293b" }}>{s.full_name}</div>
               <div style={{ fontSize:12, color:"#64748b" }}>Avg: {avg}% • <span style={{ color:g.col, fontWeight:700 }}>{g.g}</span> • {ordinal(pos)} of {classStudents.length}</div>
             </div>
-            <button onClick={()=>setReportStudent(s)} style={S.btn("#8b5cf6")}>View Report</button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>setReportStudent(s)} style={S.btn("#8b5cf6")}>👁 View</button>
+              <button onClick={()=>handleGenerateAndSend(s)} disabled={generating} style={S.btn("#25d366")}>
+                {generating ? "⏳" : "📥 PDF & WhatsApp"}
+              </button>
+            </div>
           </div>
         );
       })}
@@ -1036,6 +1115,8 @@ function TeacherDash({ user, onLogout }) {
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
   const [terms, setTerms] = useState([]);
+  const [allStudentsInClass, setAllStudentsInClass] = useState([]);
+  const [allResults, setAllResults] = useState([]);
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedTerm, setSelectedTerm] = useState("");
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -1045,14 +1126,15 @@ function TeacherDash({ user, onLogout }) {
   const [remarks, setRemarks] = useState({ teacher_remark:"", principal_remark:"" });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [currentResults, setCurrentResults] = useState([]);
+  const [currentAttendance, setCurrentAttendance] = useState(null);
+  const [currentRemarks, setCurrentRemarks] = useState(null);
 
   useEffect(() => { loadData(); }, []);
 
   const loadData = async () => {
-    const [c, t] = await Promise.all([
-      db.get("classes","?select=*"),
-      db.get("terms","?select=*"),
-    ]);
+    const [c, t] = await Promise.all([db.get("classes","?select=*"), db.get("terms","?select=*")]);
     setClasses(c); setTerms(t);
     const curr = t.find(t => t.is_current);
     if (curr) setSelectedTerm(curr.id);
@@ -1061,8 +1143,11 @@ function TeacherDash({ user, onLogout }) {
   useEffect(() => {
     if (!selectedClass) return;
     const cls = classes.find(c => c.id === selectedClass);
-    setSubjects(cls ? (NIGERIAN_SUBJECTS[cls.name] || []) : []);
-    db.get("students", `?class_id=eq.${selectedClass}&select=*`).then(setStudents);
+    setSubjects(cls ? (NIGERIAN_SUBJECTS[cls.name]||[]) : []);
+    db.get("students", `?class_id=eq.${selectedClass}&select=*`).then(s => {
+      setStudents(s);
+      setAllStudentsInClass(s);
+    });
   }, [selectedClass]);
 
   useEffect(() => {
@@ -1077,39 +1162,81 @@ function TeacherDash({ user, onLogout }) {
       db.get("remarks", `?student_id=eq.${selectedStudent.id}&term_id=eq.${selectedTerm}&select=*`),
     ]);
     const sc = {};
-    r.forEach(res => { sc[res.subject_name] = { ca: res.ca_score, exam: res.exam_score, id: res.id }; });
+    r.forEach(res => { sc[res.subject_name] = { ca:res.ca_score, exam:res.exam_score, id:res.id }; });
     setScores(sc);
-    if (a[0]) setAttendance({ days_present: a[0].days_present, total_days: a[0].total_days, id: a[0].id });
-    else setAttendance({ days_present:"", total_days:"" });
-    if (rem[0]) setRemarks({ teacher_remark: rem[0].teacher_remark||"", principal_remark: rem[0].principal_remark||"", id: rem[0].id });
-    else setRemarks({ teacher_remark:"", principal_remark:"" });
+    setCurrentResults(r);
+    if (a[0]) { setAttendance({ days_present:a[0].days_present, total_days:a[0].total_days, id:a[0].id }); setCurrentAttendance(a[0]); }
+    else { setAttendance({ days_present:"", total_days:"" }); setCurrentAttendance(null); }
+    if (rem[0]) { setRemarks({ teacher_remark:rem[0].teacher_remark||"", principal_remark:rem[0].principal_remark||"", id:rem[0].id }); setCurrentRemarks(rem[0]); }
+    else { setRemarks({ teacher_remark:"", principal_remark:"" }); setCurrentRemarks(null); }
   };
 
   const saveResults = async () => {
     if (!selectedStudent || !selectedTerm) return alert("Select student and term");
     setSaving(true);
+    const savedResultsList = [];
     for (const sub of subjects) {
-      const sc = scores[sub] || { ca: 0, exam: 0 };
+      const sc = scores[sub] || { ca:0, exam:0 };
       const existing = scores[sub]?.id;
+      let result;
       if (existing) {
-        await db.patch("results", existing, { ca_score: Number(sc.ca)||0, exam_score: Number(sc.exam)||0 });
+        result = await db.patch("results", existing, { ca_score:Number(sc.ca)||0, exam_score:Number(sc.exam)||0 });
       } else {
-        await db.post("results", { student_id: selectedStudent.id, term_id: selectedTerm, subject_name: sub, ca_score: Number(sc.ca)||0, exam_score: Number(sc.exam)||0 });
+        result = await db.post("results", { student_id:selectedStudent.id, term_id:selectedTerm, subject_name:sub, ca_score:Number(sc.ca)||0, exam_score:Number(sc.exam)||0 });
       }
+      savedResultsList.push({ subject_name:sub, ca_score:Number(sc.ca)||0, exam_score:Number(sc.exam)||0 });
     }
+    let savedAtt = currentAttendance;
     if (attendance.id) {
-      await db.patch("attendance", attendance.id, { days_present: Number(attendance.days_present)||0, total_days: Number(attendance.total_days)||0 });
+      savedAtt = { ...attendance, days_present:Number(attendance.days_present)||0, total_days:Number(attendance.total_days)||0 };
+      await db.patch("attendance", attendance.id, { days_present:Number(attendance.days_present)||0, total_days:Number(attendance.total_days)||0 });
     } else {
-      await db.post("attendance", { student_id: selectedStudent.id, term_id: selectedTerm, days_present: Number(attendance.days_present)||0, total_days: Number(attendance.total_days)||0 });
+      savedAtt = { student_id:selectedStudent.id, term_id:selectedTerm, days_present:Number(attendance.days_present)||0, total_days:Number(attendance.total_days)||0 };
+      await db.post("attendance", savedAtt);
     }
+    let savedRem = currentRemarks;
     if (remarks.id) {
-      await db.patch("remarks", remarks.id, { teacher_remark: remarks.teacher_remark, principal_remark: remarks.principal_remark });
+      savedRem = { ...remarks };
+      await db.patch("remarks", remarks.id, { teacher_remark:remarks.teacher_remark, principal_remark:remarks.principal_remark });
     } else {
-      await db.post("remarks", { student_id: selectedStudent.id, term_id: selectedTerm, teacher_remark: remarks.teacher_remark, principal_remark: remarks.principal_remark });
+      savedRem = { student_id:selectedStudent.id, term_id:selectedTerm, teacher_remark:remarks.teacher_remark, principal_remark:remarks.principal_remark };
+      await db.post("remarks", savedRem);
     }
+    setCurrentResults(savedResultsList);
+    setCurrentAttendance(savedAtt);
+    setCurrentRemarks(savedRem);
     setSaving(false); setSaved(true);
     setTimeout(() => setSaved(false), 3000);
     loadStudentData();
+  };
+
+  const generateAndSendToParent = async () => {
+    if (!selectedStudent) return;
+    setGenerating(true);
+    try {
+      const cls = classes.find(c => c.id === selectedClass);
+      const term = terms.find(t => t.id === selectedTerm);
+      const subs = cls ? (NIGERIAN_SUBJECTS[cls.name]||[]) : [];
+
+      // Get all results for class for position calculation
+      const allClassResults = await db.get("results", `?student_id=in.(${allStudentsInClass.map(s=>s.id).join(",")})&term_id=eq.${selectedTerm}&select=*`);
+
+      await generateReportPDF(
+        selectedStudent, cls, term, subs,
+        currentResults, currentAttendance, currentRemarks,
+        allStudentsInClass, allClassResults, subs
+      );
+
+      setTimeout(() => {
+        const phone = selectedStudent.guardian_phone?.replace(/\D/g,"");
+        const msg = `Dear ${selectedStudent.guardian_name||"Parent"}, please find attached the report card for ${selectedStudent.full_name} - ${term?.name||""} - Career Builder Schools. Please print and sign.`;
+        window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(msg)}`, "_blank");
+        setGenerating(false);
+      }, 2000);
+    } catch(e) {
+      alert("Error: " + e.message);
+      setGenerating(false);
+    }
   };
 
   return (
@@ -1123,9 +1250,7 @@ function TeacherDash({ user, onLogout }) {
       </div>
 
       <div style={{ padding:16, maxWidth:700, margin:"0 auto" }}>
-        <div style={S.section("#0ea5e9")}>
-          <span>📝</span><span style={{ fontWeight:800, color:"#0ea5e9" }}>Enter Student Results</span>
-        </div>
+        <div style={S.section("#0ea5e9")}><span>📝</span><span style={{ fontWeight:800, color:"#0ea5e9" }}>Enter Student Results</span></div>
 
         <div style={S.card}>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
@@ -1157,21 +1282,23 @@ function TeacherDash({ user, onLogout }) {
         {selectedStudent && (
           <div style={S.card}>
             <div style={{ fontWeight:800, color:"#1e293b", fontSize:16, marginBottom:16 }}>📋 Results for {selectedStudent.full_name}</div>
+
             <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr", gap:8, marginBottom:8 }}>
               {["Subject","C.A","Exam","Total"].map(h => (
                 <div key={h} style={{ fontSize:11, fontWeight:700, color:"#94a3b8", textTransform:"uppercase" }}>{h}</div>
               ))}
             </div>
+
             {subjects.map(sub => {
               const sc = scores[sub] || { ca:"", exam:"" };
-              const total = (Number(sc.ca)||0) + (Number(sc.exam)||0);
+              const total = (Number(sc.ca)||0)+(Number(sc.exam)||0);
               const g = getGrade(total);
               return (
                 <div key={sub} style={{ display:"grid", gridTemplateColumns:"2fr 1fr 1fr 1fr", gap:8, marginBottom:8, alignItems:"center", background:"#f8fafc", borderRadius:10, padding:"10px 12px" }}>
                   <div style={{ fontWeight:600, fontSize:13, color:"#1e293b" }}>{sub}</div>
                   <input type="number" min="0" max="40" value={sc.ca} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],ca:e.target.value}}))} placeholder="0-40" style={{ ...S.input, padding:"7px 10px" }} />
                   <input type="number" min="0" max="60" value={sc.exam} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],exam:e.target.value}}))} placeholder="0-60" style={{ ...S.input, padding:"7px 10px" }} />
-                  <div style={{ fontWeight:800, color:g.col, fontSize:15, textAlign:"center" }}>{total || "—"}</div>
+                  <div style={{ fontWeight:800, color:g.col, fontSize:15, textAlign:"center" }}>{total||"—"}</div>
                 </div>
               );
             })}
@@ -1199,10 +1326,29 @@ function TeacherDash({ user, onLogout }) {
               </div>
             </div>
 
-            {saved && <div style={{ background:"#f0fdf4", border:"1.5px solid #10b981", borderRadius:10, padding:"10px 16px", color:"#059669", fontWeight:700, marginBottom:12, textAlign:"center" }}>✅ Results saved successfully!</div>}
-            <button onClick={saveResults} disabled={saving} style={{ ...S.btn("#10b981"), width:"100%", padding:"13px", fontSize:15 }}>
-              {saving ? "Saving..." : "💾 Save Results"}
-            </button>
+            {saved && (
+              <div style={{ background:"#f0fdf4", border:"1.5px solid #10b981", borderRadius:10, padding:"10px 16px", color:"#059669", fontWeight:700, marginBottom:12, textAlign:"center" }}>
+                ✅ Results saved successfully!
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:10, flexDirection:"column" }}>
+              <button onClick={saveResults} disabled={saving} style={{ ...S.btn("#10b981"), width:"100%", padding:"13px", fontSize:15 }}>
+                {saving ? "Saving..." : "💾 Save Results"}
+              </button>
+
+              {saved && selectedStudent.guardian_phone && (
+                <button onClick={generateAndSendToParent} disabled={generating} style={{ ...S.btn("#25d366"), width:"100%", padding:"13px", fontSize:15 }}>
+                  {generating ? "⏳ Generating PDF..." : "📥 Generate PDF & Send to Parent"}
+                </button>
+              )}
+
+              {!selectedStudent.guardian_phone && saved && (
+                <div style={{ background:"#fff7ed", border:"1.5px solid #f59e0b", borderRadius:10, padding:"10px 16px", color:"#92400e", fontSize:13, textAlign:"center" }}>
+                  ⚠️ No WhatsApp number saved for this student's guardian
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
