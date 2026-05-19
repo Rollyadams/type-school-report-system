@@ -1,38 +1,4 @@
-import { useState, useEffect } from "react";
-
-const SUPABASE_URL = "https://qjejtuursuniiecthvjj.supabase.co";
-const SUPABASE_KEY = "sb_publishable_3TBSTUJEFADZFUe4BFJ9zA_bMINS_WD";
-
-const headers = {
-  "Content-Type": "application/json",
-  "apikey": SUPABASE_KEY,
-  "Authorization": `Bearer ${SUPABASE_KEY}`,
-};
-
-const db = {
-  get: async (table, query = "") => {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, { headers });
-    return res.json();
-  },
-  post: async (table, data) => {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
-      method: "POST", headers: { ...headers, "Prefer": "return=representation" },
-      body: JSON.stringify(data)
-    });
-    return res.json();
-  },
-  patch: async (table, id, data) => {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
-      method: "PATCH", headers: { ...headers, "Prefer": "return=representation" },
-      body: JSON.stringify(data)
-    });
-    return res.json();
-  },
-  delete: async (table, id) => {
-    await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, { method: "DELETE", headers });
-  }
-};
-
+import { db } from './vercelDb';
 const NIGERIAN_SUBJECTS = {
   "Primary 1": ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Primary 2": ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
