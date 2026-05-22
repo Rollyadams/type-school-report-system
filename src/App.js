@@ -398,7 +398,7 @@ function SchoolSettings({ school, reload }) {
       <div style={S.section("#8b5cf6")}><span>⚙️</span><span style={{fontWeight:800,color:"#8b5cf6"}}>School Settings</span></div>
       <div style={S.card}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <div style={{gridColumn:"1/-1"}}><label style={S.label}>School Name</label><input style={S.input} value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Career Builder Schools"/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={S.label}>School Name</label><input style={S.input} value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. School Data Center"/></div>
           <div style={{gridColumn:"1/-1"}}><label style={S.label}>Address</label><input style={S.input} value={form.address} onChange={e=>setForm(p=>({...p,address:e.target.value}))} placeholder="School address"/></div>
           <div><label style={S.label}>Phone</label><input style={S.input} value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} placeholder="08012345678"/></div>
           <div><label style={S.label}>Email</label><input style={S.input} value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="info@school.com" type="email"/></div>
