@@ -1125,6 +1125,79 @@ function Overview({ students, classes, teachers, terms, school }) {
 }
 
 // ── Principal Dashboard ────────────────────────────────────────
+// ── Sidebar Layout Shell ───────────────────────────────────────
+function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiveTab, loading, children }) {
+  const [open, setOpen] = useState(false);
+  const activeTabObj = tabs.find(t => t.id === activeTab);
+  return (
+    <div style={{ minHeight:"100vh", background:"#f0f4ff", fontFamily:"'Segoe UI',sans-serif", maxWidth:"100vw", overflowX:"hidden" }}>
+      {/* Top Bar */}
+      <div style={{ background: role==="principal" ? "linear-gradient(135deg,#1e3a8a,#4338ca)" : "linear-gradient(135deg,#0f766e,#0ea5e9)", padding:"0 16px", height:58, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 12px #00000030" }}>
+        <button onClick={() => setOpen(true)} style={{ background:"#ffffff20", border:"none", borderRadius:10, width:40, height:40, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5 }}>
+          <div style={{ width:20, height:2, background:"#fff", borderRadius:2 }}/>
+          <div style={{ width:20, height:2, background:"#fff", borderRadius:2 }}/>
+          <div style={{ width:20, height:2, background:"#fff", borderRadius:2 }}/>
+        </button>
+        <div style={{ textAlign:"center", flex:1, padding:"0 12px" }}>
+          <div style={{ color:"#fff", fontWeight:900, fontSize:15, lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{school?.name || "School"}</div>
+          <div style={{ color:"#c7d2fe", fontSize:11 }}>{activeTabObj?.icon} {activeTabObj?.label}</div>
+        </div>
+        <button onClick={onLogout} style={{ background:"#ffffff20", border:"none", color:"#fff", borderRadius:10, padding:"8px 12px", cursor:"pointer", fontSize:12, fontWeight:700, whiteSpace:"nowrap" }}>Sign Out</button>
+      </div>
+
+      {/* Overlay */}
+      {open && <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, background:"#00000060", zIndex:200 }}/>}
+
+      {/* Sidebar Drawer */}
+      <div style={{ position:"fixed", top:0, left:0, height:"100%", width:280, background:"#fff", zIndex:300, transform: open ? "translateX(0)" : "translateX(-100%)", transition:"transform 0.3s cubic-bezier(.4,0,.2,1)", boxShadow:"4px 0 32px #0000002a", display:"flex", flexDirection:"column" }}>
+        {/* Drawer Header */}
+        <div style={{ background: role==="principal" ? "linear-gradient(135deg,#1e3a8a,#4338ca)" : "linear-gradient(135deg,#0f766e,#0ea5e9)", padding:"28px 20px 20px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div>
+              {school?.logo_url && <img src={school.logo_url} alt="logo" style={{ width:44, height:44, objectFit:"contain", borderRadius:10, marginBottom:8, display:"block", background:"#fff", padding:4 }}/>}
+              <div style={{ color:"#fff", fontWeight:900, fontSize:16 }}>{school?.name || "School"}</div>
+              <div style={{ color:"#c7d2fe", fontSize:12, marginTop:2 }}>{role==="principal" ? "🏛 Principal" : "📝 Teacher"} · {user.full_name}</div>
+            </div>
+            <button onClick={() => setOpen(false)} style={{ background:"#ffffff20", border:"none", color:"#fff", borderRadius:8, width:32, height:32, cursor:"pointer", fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
+          </div>
+        </div>
+
+        {/* Nav Items */}
+        <div style={{ flex:1, overflowY:"auto", padding:"12px 0" }}>
+          {tabs.map(t => {
+            const isActive = activeTab === t.id;
+            return (
+              <button key={t.id} onClick={() => { setActiveTab(t.id); setOpen(false); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:14, padding:"13px 20px", border:"none", background: isActive ? (role==="principal" ? "#eef2ff" : "#f0fdfa") : "none", borderLeft: isActive ? `4px solid ${role==="principal" ? "#6366f1" : "#0ea5e9"}` : "4px solid transparent", cursor:"pointer", textAlign:"left" }}>
+                <span style={{ fontSize:20, width:28, textAlign:"center" }}>{t.icon}</span>
+                <div>
+                  <div style={{ fontWeight: isActive ? 800 : 600, fontSize:14, color: isActive ? (role==="principal" ? "#4338ca" : "#0f766e") : "#374151" }}>{t.label}</div>
+                  {t.desc && <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>{t.desc}</div>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Drawer Footer */}
+        <div style={{ padding:"16px 20px", borderTop:"1px solid #f1f5f9" }}>
+          <button onClick={onLogout} style={{ width:"100%", background:"#fee2e2", border:"none", borderRadius:12, padding:"12px", color:"#dc2626", fontWeight:800, fontSize:14, cursor:"pointer" }}>🚪 Logout</button>
+        </div>
+      </div>
+
+      {/* Page Content */}
+      <div style={{ padding:16, maxWidth:700, margin:"0 auto" }}>
+        {loading ? (
+          <div style={{ textAlign:"center", padding:80 }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>⏳</div>
+            <div style={{ color:"#64748b", fontWeight:600 }}>Loading…</div>
+          </div>
+        ) : children}
+      </div>
+    </div>
+  );
+}
+
+// ── Principal Dashboard ────────────────────────────────────────
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
   const [students,setStudents]=useState([]); const [classes,setClasses]=useState([]);
@@ -1139,50 +1212,35 @@ function PrincipalDash({ user, onLogout }) {
   };
 
   const tabs=[
-    {id:"overview",label:"Overview",icon:"📊"},{id:"students",label:"Students",icon:"👨‍🎓"},
-    {id:"classes",label:"Classes",icon:"🏫"},{id:"teachers",label:"Teachers",icon:"👩‍🏫"},
-    {id:"sessions",label:"Sessions",icon:"📅"},{id:"results",label:"Results",icon:"📋"},
-    {id:"promote",label:"Promote",icon:"🎖️"},{id:"settings",label:"Settings",icon:"⚙️"},
-    {id:"messages",label:"Messages",icon:"📨"},
+    {id:"overview", label:"Overview",  icon:"📊", desc:"School summary & stats"},
+    {id:"students", label:"Students",  icon:"👨‍🎓", desc:"Add & manage students"},
+    {id:"classes",  label:"Classes",   icon:"🏫", desc:"Manage class arms"},
+    {id:"teachers", label:"Teachers",  icon:"👩‍🏫", desc:"Staff & class assignment"},
+    {id:"sessions", label:"Sessions",  icon:"📅", desc:"Academic sessions & terms"},
+    {id:"results",  label:"Results",   icon:"📋", desc:"View & generate report cards"},
+    {id:"promote",  label:"Promote",   icon:"🎖️", desc:"Promote or retain students"},
+    {id:"settings", label:"Settings",  icon:"⚙️", desc:"School name, logo & info"},
+    {id:"messages", label:"Messages",  icon:"📨", desc:"WhatsApp parent messages"},
   ];
 
-  return(
-    <div style={S.app}>
-      <div style={{background:"linear-gradient(135deg,#1e3a8a,#4338ca)",padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div>
-          <div style={{color:"#fff",fontWeight:900,fontSize:16}}>🎓 {school?.name||"School"}</div>
-          <div style={{color:"#c7d2fe",fontSize:12}}>Principal Dashboard — {user.full_name}</div>
-        </div>
-        <button onClick={onLogout} style={{background:"#ffffff20",border:"none",color:"#fff",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13}}>Logout</button>
-      </div>
-      <div style={{display:"flex",overflowX:"auto",background:"#fff",borderBottom:"2px solid #e0e7ff",padding:"0 12px"}}>
-        {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"12px 14px",border:"none",borderBottom:tab===t.id?"3px solid #6366f1":"3px solid transparent",background:"none",color:tab===t.id?"#6366f1":"#64748b",fontWeight:tab===t.id?800:500,fontSize:13,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6}}>
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-      <div style={{padding:16,maxWidth:900,margin:"0 auto"}}>
-        {loading?<div style={{textAlign:"center",padding:60,color:"#64748b"}}>Loading…</div>:(
-          <>
-            {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school}/>}
-            {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id}/>}
-            {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id}/>}
-            {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id}/>}
-            {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={school?.id}/>}
-            {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
-            {tab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={loadAll}/>}
-            {tab==="settings"&&<SchoolSettings school={school} reload={loadAll}/>}
-            {tab==="messages"&&<Messages students={students} classes={classes} school={school}/>}
-          </>
-        )}
-      </div>
-    </div>
+  return (
+    <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
+      {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school}/>}
+      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
+      {tab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={loadAll}/>}
+      {tab==="settings"&&<SchoolSettings school={school} reload={loadAll}/>}
+      {tab==="messages"&&<Messages students={students} classes={classes} school={school}/>}
+    </SidebarLayout>
   );
 }
 
 // ── Teacher Dashboard ──────────────────────────────────────────
 function TeacherDash({ user, onLogout }) {
+  const [tab,setTab]=useState("results");
   const [classes,setClasses]=useState([]); const [students,setStudents]=useState([]);
   const [terms,setTerms]=useState([]); const [school,setSchool]=useState(null);
   const [allStudentsInClass,setAllStudentsInClass]=useState([]);
@@ -1193,9 +1251,11 @@ function TeacherDash({ user, onLogout }) {
   const [saved,setSaved]=useState(false); const [generating,setGenerating]=useState(false);
   const [currentResults,setCurrentResults]=useState([]); const [currentAttendance,setCurrentAttendance]=useState(null);
   const [currentRemarks,setCurrentRemarks]=useState(null); const [logoDataUrl,setLogoDataUrl]=useState(null);
+  const [loading,setLoading]=useState(true);
 
   useEffect(()=>{loadData();},[]);
   const loadData=async()=>{
+    setLoading(true);
     const [c,t,sc]=await Promise.all([db.get("classes"),db.get("terms"),db.get("schools")]);
     const schoolData=sc[0]||null; setSchool(schoolData); setTerms(t);
     const curr=t.find(t=>t.is_current); if(curr) setSelectedTerm(curr.id);
@@ -1204,6 +1264,7 @@ function TeacherDash({ user, onLogout }) {
     if(schoolData?.logo_url){
       fetch(schoolData.logo_url).then(r=>r.blob()).then(blob=>new Promise(res=>{const reader=new FileReader();reader.onload=()=>res(reader.result);reader.readAsDataURL(blob);})).then(setLogoDataUrl).catch(()=>{});
     }
+    setLoading(false);
   };
 
   useEffect(()=>{
@@ -1275,82 +1336,83 @@ function TeacherDash({ user, onLogout }) {
     }catch(e){alert("Error: "+e.message);setGenerating(false);}
   };
 
-  const assignedCls=user.class_id?classes.find(c=>c.id===user.class_id):null;
+  const tabs=[
+    {id:"results", label:"Enter Results", icon:"📝", desc:"Score entry per student"},
+    {id:"report",  label:"View Reports",  icon:"📋", desc:"View & download report cards"},
+  ];
 
-  return(
-    <div style={S.app}>
-      <div style={{background:"linear-gradient(135deg,#0f766e,#0ea5e9)",padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div>
-          <div style={{color:"#fff",fontWeight:900,fontSize:16}}>📝 {school?.name||"School"}</div>
-          <div style={{color:"#bfdbfe",fontSize:12}}>Teacher: {user.full_name}{assignedCls?` — ${assignedCls.name} ${assignedCls.arm||""}`:""}</div>
-        </div>
-        <button onClick={onLogout} style={{background:"#ffffff20",border:"none",color:"#fff",borderRadius:8,padding:"6px 14px",cursor:"pointer",fontSize:13}}>Logout</button>
-      </div>
-      <div style={{padding:16,maxWidth:700,margin:"0 auto"}}>
-        <div style={S.section("#0ea5e9")}><span>📝</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Enter Student Results</span></div>
-        {!user.class_id&&<div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#92400e",fontWeight:600}}>⚠️ No class assigned to you. Ask the Principal to assign you a class.</div>}
-        <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-            <div><label style={S.label}>Class</label>
-              <select style={S.input} value={selectedClass} onChange={e=>setSelectedClass(e.target.value)} disabled={!!user.class_id}>
-                <option value="">Choose class</option>
-                {classes.map(c=><option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
-              </select>
-            </div>
-            <div><label style={S.label}>Term</label>
-              <select style={S.input} value={selectedTerm} onChange={e=>setSelectedTerm(e.target.value)}>
-                <option value="">Choose term</option>
-                {terms.map(t=><option key={t.id} value={t.id}>{t.name}{t.is_current?" ✓":""}</option>)}
-              </select>
-            </div>
+  const TeacherResults = () => (
+    <div>
+      <div style={S.section("#0ea5e9")}><span>📝</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Enter Student Results</span></div>
+      {!user.class_id&&<div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#92400e",fontWeight:600}}>⚠️ No class assigned. Ask the Principal to assign you a class.</div>}
+      <div style={S.card}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+          <div><label style={S.label}>Class</label>
+            <select style={S.input} value={selectedClass} onChange={e=>setSelectedClass(e.target.value)} disabled={!!user.class_id}>
+              <option value="">Choose class</option>
+              {classes.map(c=><option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
+            </select>
           </div>
-          {selectedClass&&(
-            <div><label style={S.label}>Select Student</label>
-              <select style={S.input} value={selectedStudent?.id||""} onChange={e=>setSelectedStudent(students.find(s=>s.id===e.target.value)||null)}>
-                <option value="">Choose student</option>
-                {students.map(s=><option key={s.id} value={s.id}>{s.full_name}</option>)}
-              </select>
-            </div>
-          )}
+          <div><label style={S.label}>Term</label>
+            <select style={S.input} value={selectedTerm} onChange={e=>setSelectedTerm(e.target.value)}>
+              <option value="">Choose term</option>
+              {terms.map(t=><option key={t.id} value={t.id}>{t.name}{t.is_current?" ✓":""}</option>)}
+            </select>
+          </div>
         </div>
-        {selectedStudent&&(
-          <div style={S.card}>
-            <div style={{fontWeight:800,color:"#1e293b",fontSize:16,marginBottom:16}}>📋 {selectedStudent.full_name}</div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              {["Subject","C.A (0-40)","Exam (0-60)","Total"].map(h=><div key={h} style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>{h}</div>)}
-            </div>
-            {subjects.map(sub=>{
-              const sc=scores[sub]||{ca:"",exam:""};
-              const total=(Number(sc.ca)||0)+(Number(sc.exam)||0);
-              const g=getGrade(total);
-              return(
-                <div key={sub} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
-                  <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
-                  <input type="number" min="0" max="40" value={sc.ca} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],ca:e.target.value}}))} placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
-                  <input type="number" min="0" max="60" value={sc.exam} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],exam:e.target.value}}))} placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
-                  <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
-                </div>
-              );
-            })}
-            <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
-              <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-                <div><label style={S.label}>Days Present</label><input type="number" style={S.input} value={attendance.days_present} onChange={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
-                <div><label style={S.label}>Total School Days</label><input type="number" style={S.input} value={attendance.total_days} onChange={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
-              </div>
-              <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>💬 Class Teacher's Remark</div>
-              <textarea style={{...S.input,height:70,resize:"vertical",marginBottom:16}} value={remarks.teacher_remark} onChange={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks…"/>
-            </div>
-            {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
-            <div style={{display:"flex",gap:10,flexDirection:"column"}}>
-              <button onClick={saveResults} disabled={saving} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{saving?"Saving…":"💾 Save Results"}</button>
-              {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Generating PDF…":"📥 Generate PDF & Send to Parent"}</button>}
-              {saved&&!selectedStudent.guardian_phone&&<div style={{background:"#fff7ed",border:"1.5px solid #f59e0b",borderRadius:10,padding:"10px 16px",color:"#92400e",fontSize:13,textAlign:"center"}}>⚠️ No WhatsApp number for this student's guardian</div>}
-            </div>
+        {selectedClass&&(
+          <div><label style={S.label}>Select Student</label>
+            <select style={S.input} value={selectedStudent?.id||""} onChange={e=>setSelectedStudent(students.find(s=>s.id===e.target.value)||null)}>
+              <option value="">Choose student</option>
+              {students.map(s=><option key={s.id} value={s.id}>{s.full_name}</option>)}
+            </select>
           </div>
         )}
       </div>
+      {selectedStudent&&(
+        <div style={S.card}>
+          <div style={{fontWeight:800,color:"#1e293b",fontSize:16,marginBottom:16}}>📋 {selectedStudent.full_name}</div>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+            {["Subject","CA (40)","Exam (60)","Total"].map(h=><div key={h} style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>{h}</div>)}
+          </div>
+          {subjects.map(sub=>{
+            const sc=scores[sub]||{ca:"",exam:""};
+            const total=(Number(sc.ca)||0)+(Number(sc.exam)||0);
+            const g=getGrade(total);
+            return(
+              <div key={sub} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
+                <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
+                <input type="number" min="0" max="40" value={sc.ca} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],ca:e.target.value}}))} placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
+                <input type="number" min="0" max="60" value={sc.exam} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],exam:e.target.value}}))} placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
+                <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
+              </div>
+            );
+          })}
+          <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
+            <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+              <div><label style={S.label}>Days Present</label><input type="number" style={S.input} value={attendance.days_present} onChange={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
+              <div><label style={S.label}>Total School Days</label><input type="number" style={S.input} value={attendance.total_days} onChange={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
+            </div>
+            <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>💬 Class Teacher's Remark</div>
+            <textarea style={{...S.input,height:70,resize:"vertical",marginBottom:16}} value={remarks.teacher_remark} onChange={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks…"/>
+          </div>
+          {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
+          <div style={{display:"flex",gap:10,flexDirection:"column"}}>
+            <button onClick={saveResults} disabled={saving} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{saving?"Saving…":"💾 Save Results"}</button>
+            {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Generating PDF…":"📥 Generate PDF & Send to Parent"}</button>}
+            {saved&&!selectedStudent.guardian_phone&&<div style={{background:"#fff7ed",border:"1.5px solid #f59e0b",borderRadius:10,padding:"10px 16px",color:"#92400e",fontSize:13,textAlign:"center"}}>⚠️ No WhatsApp number for this student's guardian</div>}
+          </div>
+        </div>
+      )}
     </div>
+  );
+
+  return(
+    <SidebarLayout user={user} role="teacher" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
+      {tab==="results"&&<TeacherResults/>}
+      {tab==="report"&&<ViewResults students={students} classes={classes.length?classes:[]} terms={terms} school={school} isPrincipal={false}/>}
+    </SidebarLayout>
   );
 }
 
