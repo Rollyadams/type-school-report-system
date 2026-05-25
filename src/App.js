@@ -1100,19 +1100,52 @@ function Messages({ students, classes, school }) {
 }
 
 // ── Overview ───────────────────────────────────────────────────
-function Overview({ students, classes, teachers, terms, school }) {
+function Overview({ students, classes, teachers, terms, school, onNavigate }) {
   const currentTerm=terms.find(t=>t.is_current);
+  const [hovered,setHovered]=useState(null);
+  const cards=[
+    {label:"Total Students",value:students.length,icon:"👨‍🎓",col:"#6366f1",tab:"students",hint:"Manage students →"},
+    {label:"Total Classes",value:classes.length,icon:"🏫",col:"#0ea5e9",tab:"classes",hint:"Manage classes →"},
+    {label:"Total Teachers",value:teachers.length,icon:"👩‍🏫",col:"#10b981",tab:"teachers",hint:"Manage teachers →"},
+    {label:"Current Term",value:currentTerm?.name||"Not set",icon:"📅",col:"#f59e0b",tab:"sessions",hint:"View sessions →"},
+  ];
   return(
     <div>
       <div style={S.section()}><span style={{fontSize:18}}>📊</span><span style={{fontWeight:800,color:"#6366f1",fontSize:15}}>School Overview</span></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
-        {[{label:"Total Students",value:students.length,icon:"👨‍🎓",col:"#6366f1"},{label:"Total Classes",value:classes.length,icon:"🏫",col:"#0ea5e9"},{label:"Total Teachers",value:teachers.length,icon:"👩‍🏫",col:"#10b981"},{label:"Current Term",value:currentTerm?.name||"Not set",icon:"📅",col:"#f59e0b"}].map(s=>(
-          <div key={s.label} style={{background:`${s.col}10`,border:`1.5px solid ${s.col}30`,borderRadius:14,padding:16,textAlign:"center"}}>
-            <div style={{fontSize:28}}>{s.icon}</div>
-            <div style={{fontSize:22,fontWeight:900,color:s.col}}>{s.value}</div>
-            <div style={{fontSize:12,color:"#64748b",fontWeight:600}}>{s.label}</div>
-          </div>
-        ))}
+        {cards.map(s=>{
+          const isHov=hovered===s.label;
+          return(
+            <div
+              key={s.label}
+              onClick={()=>onNavigate(s.tab)}
+              onMouseEnter={()=>setHovered(s.label)}
+              onMouseLeave={()=>setHovered(null)}
+              onTouchStart={()=>setHovered(s.label)}
+              onTouchEnd={()=>setHovered(null)}
+              style={{
+                background: isHov ? `${s.col}20` : `${s.col}10`,
+                border:`2px solid ${isHov?s.col:`${s.col}40`}`,
+                borderRadius:14,padding:16,textAlign:"center",
+                cursor:"pointer",
+                transform: isHov?"translateY(-2px)":"none",
+                transition:"all 0.18s ease",
+                boxShadow: isHov?`0 6px 20px ${s.col}30`:"none",
+                position:"relative",overflow:"hidden",
+              }}
+            >
+              <div style={{fontSize:28}}>{s.icon}</div>
+              <div style={{fontSize:22,fontWeight:900,color:s.col}}>{s.value}</div>
+              <div style={{fontSize:12,color:"#64748b",fontWeight:600}}>{s.label}</div>
+              <div style={{
+                fontSize:10,color:s.col,fontWeight:700,marginTop:6,
+                opacity: isHov?1:0,
+                transition:"opacity 0.18s ease",
+                letterSpacing:"0.03em",
+              }}>{s.hint}</div>
+            </div>
+          );
+        })}
       </div>
       {currentTerm?.resumption_date&&(
         <div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:14,padding:16,textAlign:"center"}}>
@@ -1225,7 +1258,7 @@ function PrincipalDash({ user, onLogout }) {
 
   return (
     <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
-      {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school}/>}
+      {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/>}
       {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id}/>}
       {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id}/>}
