@@ -557,7 +557,18 @@ function ManageStudents({ students, classes, reload, schoolId }) {
     setForm({full_name:s.full_name,admission_number:s.admission_number||"",gender:s.gender||"",date_of_birth:s.date_of_birth||"",guardian_name:s.guardian_name||"",guardian_phone:s.guardian_phone||"",class_id:s.class_id});
     setEditId(s.id);setAdding(true);
   };
-  const filtered=students.filter(s=>s.full_name.toLowerCase().includes(search.toLowerCase()));
+  const filtered=students
+    .filter(s=>s.full_name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a,b)=>{
+      const clsA=classes.find(c=>c.id===a.class_id);
+      const clsB=classes.find(c=>c.id===b.class_id);
+      const orderA=CLASS_ORDER.indexOf(clsA?.name??""); const adjA=orderA===-1?999:orderA;
+      const orderB=CLASS_ORDER.indexOf(clsB?.name??""); const adjB=orderB===-1?999:orderB;
+      if(adjA!==adjB) return adjA-adjB;
+      const armA=clsA?.arm||""; const armB=clsB?.arm||"";
+      if(armA!==armB) return armA.localeCompare(armB);
+      return a.full_name.localeCompare(b.full_name);
+    });
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
