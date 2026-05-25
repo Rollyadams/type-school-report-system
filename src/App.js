@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db, supabase } from './supabaseClient';
 
 const NIGERIAN_SUBJECTS = {
@@ -1168,72 +1168,120 @@ function Overview({ students, classes, teachers, terms, school, onNavigate }) {
   );
 }
 
-// ── Principal Dashboard ────────────────────────────────────────
 // ── Sidebar Layout Shell ───────────────────────────────────────
 function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiveTab, loading, children }) {
   const [open, setOpen] = useState(false);
   const activeTabObj = tabs.find(t => t.id === activeTab);
+  const isP = role === "principal";
+  const grad = isP ? "linear-gradient(135deg,#1e3a8a,#4338ca)" : "linear-gradient(135deg,#0f766e,#0ea5e9)";
+  const accent = isP ? "#6366f1" : "#0ea5e9";
+  const prevTabRef = useRef(null);
+  const defaultTab = tabs[0]?.id;
+
+  // Push initial history entry on mount
+  useEffect(() => { window.history.pushState({ tab: activeTab }, ""); }, []);
+
+  // Push new state on every tab change
+  useEffect(() => {
+    if (prevTabRef.current === null) { prevTabRef.current = activeTab; return; }
+    if (prevTabRef.current !== activeTab) {
+      window.history.pushState({ tab: activeTab }, "");
+      prevTabRef.current = activeTab;
+    }
+  }, [activeTab]);
+
+  // Handle Android hardware back button
+  useEffect(() => {
+    const onPop = (e) => {
+      if (open) { setOpen(false); window.history.pushState({ tab: activeTab }, ""); return; }
+      const prevTab = e.state?.tab;
+      if (prevTab && prevTab !== activeTab) {
+        setActiveTab(prevTab);
+      } else if (activeTab !== defaultTab) {
+        setActiveTab(defaultTab);
+        window.history.pushState({ tab: defaultTab }, "");
+      }
+      // already on default tab — let browser handle (exits app correctly)
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [activeTab, open, defaultTab]);
+
   return (
-    <div style={{ minHeight:"100vh", background:"#f0f4ff", fontFamily:"'Segoe UI',sans-serif", maxWidth:"100vw", overflowX:"hidden" }}>
-      {/* Top Bar */}
-      <div style={{ background: role==="principal" ? "linear-gradient(135deg,#1e3a8a,#4338ca)" : "linear-gradient(135deg,#0f766e,#0ea5e9)", padding:"0 16px", height:58, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 12px #00000030" }}>
-        <button onClick={() => setOpen(true)} style={{ background:"#ffffff20", border:"none", borderRadius:10, width:40, height:40, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5 }}>
-          <div style={{ width:20, height:2, background:"#fff", borderRadius:2 }}/>
-          <div style={{ width:20, height:2, background:"#fff", borderRadius:2 }}/>
-          <div style={{ width:20, height:2, background:"#fff", borderRadius:2 }}/>
+    <div style={{ minHeight:"100vh", background:"#eef2ff", fontFamily:"'Segoe UI',sans-serif", maxWidth:"100vw", overflowX:"hidden" }}>
+
+      {/* ── Top Bar ── */}
+      <div style={{ background: grad, padding:"0 16px", height:62, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 4px 24px #00000040" }}>
+        <button onClick={() => setOpen(true)} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5, flexShrink:0 }}>
+          <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
+          <div style={{ width:14, height:2, background:"#ffffffaa", borderRadius:2 }}/>
+          <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
         </button>
-        <div style={{ textAlign:"center", flex:1, padding:"0 12px" }}>
-          <div style={{ color:"#fff", fontWeight:900, fontSize:15, lineHeight:1.2, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{school?.name || "School"}</div>
-          <div style={{ color:"#c7d2fe", fontSize:11 }}>{activeTabObj?.icon} {activeTabObj?.label}</div>
+        <div style={{ textAlign:"center", flex:1, padding:"0 10px", minWidth:0 }}>
+          <div style={{ color:"#fff", fontWeight:900, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", letterSpacing:"0.01em" }}>{school?.name || "School Data Center"}</div>
+          <div style={{ color:"#c7d2fecc", fontSize:10, marginTop:2, letterSpacing:"0.06em", textTransform:"uppercase" }}>{activeTabObj?.icon} {activeTabObj?.label}</div>
         </div>
-        <button onClick={onLogout} style={{ background:"#ffffff20", border:"none", color:"#fff", borderRadius:10, padding:"8px 12px", cursor:"pointer", fontSize:12, fontWeight:700, whiteSpace:"nowrap" }}>Sign Out</button>
+        <button onClick={onLogout} style={{ background:"#ffffff18", border:"1px solid #ffffff25", color:"#fff", borderRadius:12, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>Sign Out</button>
       </div>
 
-      {/* Overlay */}
-      {open && <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, background:"#00000060", zIndex:200 }}/>}
+      {/* ── Overlay ── */}
+      {open && <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, background:"#00000065", zIndex:200, backdropFilter:"blur(2px)" }}/>}
 
-      {/* Sidebar Drawer */}
-      <div style={{ position:"fixed", top:0, left:0, height:"100%", width:280, background:"#fff", zIndex:300, transform: open ? "translateX(0)" : "translateX(-100%)", transition:"transform 0.3s cubic-bezier(.4,0,.2,1)", boxShadow:"4px 0 32px #0000002a", display:"flex", flexDirection:"column" }}>
-        {/* Drawer Header */}
-        <div style={{ background: role==="principal" ? "linear-gradient(135deg,#1e3a8a,#4338ca)" : "linear-gradient(135deg,#0f766e,#0ea5e9)", padding:"28px 20px 20px" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+      {/* ── Sidebar Drawer ── */}
+      <div style={{ position:"fixed", top:0, left:0, height:"100%", width:285, background:"#fff", zIndex:300, transform: open ? "translateX(0)" : "translateX(-100%)", transition:"transform 0.28s cubic-bezier(.4,0,.2,1)", boxShadow:"6px 0 40px #00000030", display:"flex", flexDirection:"column" }}>
+        <div style={{ background: grad, padding:"36px 20px 22px", position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:-30, right:-30, width:120, height:120, borderRadius:"50%", background:"#ffffff10" }}/>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", position:"relative" }}>
             <div>
-              {school?.logo_url && <img src={school.logo_url} alt="logo" style={{ width:44, height:44, objectFit:"contain", borderRadius:10, marginBottom:8, display:"block", background:"#fff", padding:4 }}/>}
-              <div style={{ color:"#fff", fontWeight:900, fontSize:16 }}>{school?.name || "School"}</div>
-              <div style={{ color:"#c7d2fe", fontSize:12, marginTop:2 }}>{role==="principal" ? "🏛 Principal" : "📝 Teacher"} · {user.full_name}</div>
+              {school?.logo_url
+                ? <img src={school.logo_url} alt="logo" style={{ width:48, height:48, objectFit:"contain", borderRadius:12, marginBottom:10, display:"block", background:"#fff", padding:4, boxShadow:"0 2px 10px #00000030" }}/>
+                : <div style={{ width:48, height:48, borderRadius:12, marginBottom:10, display:"flex", alignItems:"center", justifyContent:"center", background:"#ffffff25", fontSize:22 }}>{"🎓"}</div>
+              }
+              <div style={{ color:"#fff", fontWeight:900, fontSize:15 }}>{school?.name || "School"}</div>
+              <div style={{ color:"#c7d2fecc", fontSize:12, marginTop:3, display:"flex", alignItems:"center", gap:6 }}>
+                <span style={{ background:"#ffffff20", borderRadius:20, padding:"2px 8px", fontSize:10, fontWeight:700 }}>{isP ? "PRINCIPAL" : "TEACHER"}</span>
+                {user.full_name}
+              </div>
             </div>
-            <button onClick={() => setOpen(false)} style={{ background:"#ffffff20", border:"none", color:"#fff", borderRadius:8, width:32, height:32, cursor:"pointer", fontSize:18, display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
+            <button onClick={() => setOpen(false)} style={{ background:"#ffffff20", border:"none", color:"#fff", borderRadius:10, width:34, height:34, cursor:"pointer", fontSize:20, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{"×"}</button>
           </div>
         </div>
 
-        {/* Nav Items */}
-        <div style={{ flex:1, overflowY:"auto", padding:"12px 0" }}>
+        <div style={{ flex:1, overflowY:"auto", padding:"8px 0" }}>
           {tabs.map(t => {
             const isActive = activeTab === t.id;
             return (
-              <button key={t.id} onClick={() => { setActiveTab(t.id); setOpen(false); }} style={{ width:"100%", display:"flex", alignItems:"center", gap:14, padding:"13px 20px", border:"none", background: isActive ? (role==="principal" ? "#eef2ff" : "#f0fdfa") : "none", borderLeft: isActive ? `4px solid ${role==="principal" ? "#6366f1" : "#0ea5e9"}` : "4px solid transparent", cursor:"pointer", textAlign:"left" }}>
-                <span style={{ fontSize:20, width:28, textAlign:"center" }}>{t.icon}</span>
-                <div>
-                  <div style={{ fontWeight: isActive ? 800 : 600, fontSize:14, color: isActive ? (role==="principal" ? "#4338ca" : "#0f766e") : "#374151" }}>{t.label}</div>
+              <button key={t.id} onClick={() => { setActiveTab(t.id); setOpen(false); }}
+                style={{ width:"100%", display:"flex", alignItems:"center", gap:14, padding:"12px 20px", border:"none",
+                  background: isActive ? `${accent}12` : "none",
+                  borderLeft: isActive ? `4px solid ${accent}` : "4px solid transparent",
+                  cursor:"pointer", textAlign:"left" }}>
+                <div style={{ width:38, height:38, borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18,
+                  background: isActive ? `${accent}20` : "#f8fafc",
+                  boxShadow: isActive ? `0 2px 8px ${accent}30` : "none" }}>
+                  {t.icon}
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight: isActive ? 800 : 600, fontSize:14, color: isActive ? accent : "#374151" }}>{t.label}</div>
                   {t.desc && <div style={{ fontSize:11, color:"#94a3b8", marginTop:1 }}>{t.desc}</div>}
                 </div>
+                {isActive && <div style={{ width:6, height:6, borderRadius:"50%", background:accent, flexShrink:0 }}/>}
               </button>
             );
           })}
         </div>
 
-        {/* Drawer Footer */}
-        <div style={{ padding:"16px 20px", borderTop:"1px solid #f1f5f9" }}>
-          <button onClick={onLogout} style={{ width:"100%", background:"#fee2e2", border:"none", borderRadius:12, padding:"12px", color:"#dc2626", fontWeight:800, fontSize:14, cursor:"pointer" }}>🚪 Logout</button>
+        <div style={{ padding:"14px 16px", borderTop:"1px solid #f1f5f9" }}>
+          <button onClick={onLogout} style={{ width:"100%", background:"#fff0f0", border:"1.5px solid #fecaca", borderRadius:12, padding:"12px", color:"#dc2626", fontWeight:800, fontSize:14, cursor:"pointer" }}>{"🚪 Logout"}</button>
         </div>
       </div>
 
-      {/* Page Content */}
-      <div style={{ padding:16, maxWidth:700, margin:"0 auto" }}>
+      {/* ── Page Content ── */}
+      <div style={{ padding:"16px 16px 32px", maxWidth:700, margin:"0 auto" }}>
         {loading ? (
           <div style={{ textAlign:"center", padding:80 }}>
-            <div style={{ fontSize:40, marginBottom:12 }}>⏳</div>
-            <div style={{ color:"#64748b", fontWeight:600 }}>Loading…</div>
+            <div style={{ fontSize:48, marginBottom:12, opacity:0.4 }}>{"⏳"}</div>
+            <div style={{ color:"#94a3b8", fontWeight:600, fontSize:14 }}>Loading…</div>
           </div>
         ) : children}
       </div>
@@ -1241,7 +1289,6 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
   );
 }
 
-// ── Principal Dashboard ────────────────────────────────────────
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
   const [students,setStudents]=useState([]); const [classes,setClasses]=useState([]);
