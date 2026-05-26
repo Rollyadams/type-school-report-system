@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, supabase } from './supabaseClient';
+import { db, supabase, activateUserContext } from './supabaseClient';
 
 const NIGERIAN_SUBJECTS = {
   "Primary 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
@@ -211,6 +211,7 @@ function Login({ onLogin }) {
       const users=await db.get("users",{email});
       if(!users.length){setErr("User not found");setLoading(false);return;}
       if(pass!=="school1234"){setErr("Incorrect password");setLoading(false);return;}
+      await activateUserContext(users[0].id);
       onLogin(users[0]);
     }catch(e){setErr("Connection error. Try again.");}
     setLoading(false);
