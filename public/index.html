@@ -2,18 +2,73 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!-- PWA core -->
     <meta name="theme-color" content="#1e3a8a" />
-    <title>Career Builder Schools</title>
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- iOS PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SchoolApp" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+
+    <!-- Android / SEO -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="SchoolApp" />
+    <meta name="description" content="Academic report management for Nigerian schools" />
+
+    <!-- Prevent phone-number detection -->
+    <meta name="format-detection" content="telephone=no" />
+
+    <title>School Report System</title>
+
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Segoe UI', sans-serif; background: #f0f4ff; }
+      body { font-family: 'Segoe UI', sans-serif; background: #eef2ff; -webkit-tap-highlight-color: transparent; }
       #root { min-height: 100vh; }
+
+      /* Splash screen while React loads */
+      #splash {
+        position: fixed; inset: 0;
+        background: linear-gradient(135deg, #1e3a8a, #4338ca);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        z-index: 9999; transition: opacity 0.4s ease;
+      }
+      #splash.hidden { opacity: 0; pointer-events: none; }
+      #splash-icon { font-size: 64px; margin-bottom: 16px; }
+      #splash-title { color: #fff; font-size: 22px; font-weight: 900; letter-spacing: 0.02em; }
+      #splash-sub { color: #c7d2fe; font-size: 13px; margin-top: 6px; }
+      #splash-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #6366f1; margin-top: 32px;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.6); opacity: 0.5; }
+      }
     </style>
   </head>
   <body>
+    <!-- Splash shown until React mounts -->
+    <div id="splash">
+      <div id="splash-icon">🎓</div>
+      <div id="splash-title">School Report System</div>
+      <div id="splash-sub">Loading your dashboard…</div>
+      <div id="splash-dot"></div>
+    </div>
+
     <div id="root"></div>
-    <!-- jsPDF loaded on demand inside App.js — no blocking scripts needed -->
+
+    <script>
+      // Hide splash once React renders
+      window.__hideSplash = function() {
+        const s = document.getElementById('splash');
+        if (s) { s.classList.add('hidden'); setTimeout(() => s.remove(), 500); }
+      };
+    </script>
   </body>
 </html>
-
