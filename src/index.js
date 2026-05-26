@@ -5,33 +5,25 @@ import App from './App';
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
 
-// Hide splash screen once React has painted
+// Hide splash screen
 requestAnimationFrame(() => {
-  setTimeout(() => {
-    if (window.__hideSplash) window.__hideSplash();
-  }, 300);
+  setTimeout(() => { if (window.__hideSplash) window.__hideSplash(); }, 300);
 });
 
-// ── Service Worker Registration ──────────────────────────────
+// Register Service Worker for PWA + caching
 if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
   window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('/service-worker.js')
+    navigator.serviceWorker.register('/service-worker.js')
       .then(reg => {
-        console.log('[SW] Registered:', reg.scope);
-
-        // Notify SW to skip waiting when a new version is available
         reg.addEventListener('updatefound', () => {
-          const newWorker = reg.installing;
-          newWorker?.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // New version available — could show a toast here
-              newWorker.postMessage({ type: 'SKIP_WAITING' });
-              console.log('[SW] New version activated');
+          const nw = reg.installing;
+          nw && nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              nw.postMessage({ type: 'SKIP_WAITING' });
             }
           });
         });
       })
-      .catch(err => console.error('[SW] Registration failed:', err));
+      .catch(err => console.error('[SW] Failed:', err));
   });
 }
