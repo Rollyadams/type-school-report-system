@@ -1169,6 +1169,95 @@ function Overview({ students, classes, teachers, terms, school, onNavigate }) {
   );
 }
 
+// ── Free Banner ───────────────────────────────────────────────
+function FreeBanner({ school }) {
+  const [vis, setVis] = useState(true);
+  if (!vis) return null;
+  if (school && school.is_paid) return null;
+  return (
+    <div style={{
+      position:"fixed", bottom:0, left:0, right:0, zIndex:500,
+      background:"linear-gradient(90deg,#ea580c,#f59e0b)",
+      padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between",
+      boxShadow:"0 -4px 20px #00000030"
+    }}>
+      <div>
+        <div style={{color:"#fff",fontWeight:900,fontSize:13}}>🔓 Free Limited Version</div>
+        <div style={{color:"#fff9",fontSize:11,marginTop:1}}>Contact admin to unlock full access</div>
+      </div>
+      <button onClick={()=>setVis(false)} style={{background:"#ffffff25",border:"none",color:"#fff",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700}}>Dismiss</button>
+    </div>
+  );
+}
+
+// ── Notification Bell ─────────────────────────────────────────
+function NotificationBell({ schoolId }) {
+  const [notifs, setNotifs] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    if (!schoolId) return;
+    setLoading(true);
+    const data = await db.get("notifications", { school_id: schoolId });
+    data.sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    setNotifs(data);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, [schoolId]);
+
+  const unread = notifs.filter(n => !n.read).length;
+
+  const markRead = async (n) => {
+    if (!n.read) {
+      await db.patch("notifications", n.id, { read: true });
+      setNotifs(p => p.map(x => x.id === n.id ? {...x, read:true} : x));
+    }
+  };
+
+  const markAll = async () => {
+    const unreadList = notifs.filter(n => !n.read);
+    for (const n of unreadList) await db.patch("notifications", n.id, { read: true });
+    setNotifs(p => p.map(x => ({...x, read:true})));
+  };
+
+  return (
+    <div style={{ position:"relative" }}>
+      <button onClick={() => { setOpen(o => !o); load(); }}
+        style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, position:"relative", flexShrink:0 }}>
+        🔔
+        {unread > 0 && (
+          <div style={{ position:"absolute", top:6, right:6, width:16, height:16, borderRadius:"50%", background:"#ef4444", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:900, color:"#fff", border:"2px solid #1e3a8a" }}>{unread > 9 ? "9+" : unread}</div>
+        )}
+      </button>
+
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, zIndex:400 }}/>
+          <div style={{ position:"fixed", top:62, right:0, width:300, maxHeight:"70vh", background:"#fff", borderRadius:"0 0 0 16px", boxShadow:"-4px 4px 30px #00000025", zIndex:500, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+            <div style={{ padding:"14px 16px", borderBottom:"1px solid #f1f5f9", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontWeight:800, fontSize:14, color:"#1e293b" }}>🔔 Notifications {unread > 0 && <span style={{ background:"#ef4444", color:"#fff", borderRadius:20, padding:"1px 7px", fontSize:11 }}>{unread}</span>}</div>
+              {unread > 0 && <button onClick={markAll} style={{ background:"none", border:"none", color:"#6366f1", fontSize:11, fontWeight:700, cursor:"pointer" }}>Mark all read</button>}
+            </div>
+            <div style={{ overflowY:"auto", flex:1 }}>
+              {loading && <div style={{ padding:20, textAlign:"center", color:"#94a3b8", fontSize:13 }}>Loading…</div>}
+              {!loading && notifs.length === 0 && <div style={{ padding:24, textAlign:"center", color:"#94a3b8", fontSize:13 }}>No notifications yet</div>}
+              {notifs.map(n => (
+                <div key={n.id} onClick={() => markRead(n)}
+                  style={{ padding:"12px 16px", borderBottom:"1px solid #f8fafc", background: n.read ? "#fff" : "#eef2ff", cursor:"pointer" }}>
+                  <div style={{ fontSize:12, color: n.read ? "#64748b" : "#1e293b", fontWeight: n.read ? 400 : 700, lineHeight:1.4 }}>{n.message}</div>
+                  <div style={{ fontSize:10, color:"#94a3b8", marginTop:4 }}>{new Date(n.created_at).toLocaleString()}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Sidebar Layout Shell ───────────────────────────────────────
 function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiveTab, loading, children }) {
   const [open, setOpen] = useState(false);
@@ -1222,7 +1311,10 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
           <div style={{ color:"#fff", fontWeight:900, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", letterSpacing:"0.01em" }}>{school?.name || "School Data Center"}</div>
           <div style={{ color:"#c7d2fecc", fontSize:10, marginTop:2, letterSpacing:"0.06em", textTransform:"uppercase" }}>{activeTabObj?.icon} {activeTabObj?.label}</div>
         </div>
-        <button onClick={onLogout} style={{ background:"#ffffff18", border:"1px solid #ffffff25", color:"#fff", borderRadius:12, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>Sign Out</button>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+          {isP && <NotificationBell schoolId={school && school.id} />}
+          <button onClick={onLogout} style={{ background:"#ffffff18", border:"1px solid #ffffff25", color:"#fff", borderRadius:12, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700, whiteSpace:"nowrap" }}>Sign Out</button>
+        </div>
       </div>
 
       {/* ── Overlay ── */}
@@ -1277,8 +1369,9 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
         </div>
       </div>
 
+      <FreeBanner school={school} />
       {/* ── Page Content ── */}
-      <div style={{ padding:"16px 16px 32px", maxWidth:700, margin:"0 auto" }}>
+      <div style={{ padding:"16px 16px 80px", maxWidth:700, margin:"0 auto" }}>
         {loading ? (
           <div style={{ textAlign:"center", padding:80 }}>
             <div style={{ fontSize:48, marginBottom:12, opacity:0.4 }}>{"⏳"}</div>
@@ -1407,6 +1500,16 @@ function TeacherDash({ user, onLogout }) {
     if(remarks.id) await db.patch("remarks",remarks.id,{teacher_remark:remarks.teacher_remark});
     else{const ins=await db.post("remarks",{student_id:selectedStudent.id,term_id:selectedTerm,teacher_remark:remarks.teacher_remark});if(ins)setRemarks(p=>({...p,id:ins.id}));}
     setCurrentResults(savedList.map(r=>({...r,student_id:selectedStudent.id,term_id:selectedTerm})));
+    // Post notification for principal
+    try{
+      const termName=(terms.find(t=>t.id===selectedTerm)||{}).name||"";
+      await db.post("notifications",{
+        school_id:school?school.id:null,
+        message:user.full_name+" saved results for "+selectedStudent.full_name+" ("+termName+")",
+        teacher_id:user.id,
+        read:false
+      });
+    }catch(e){}
     setSaving(false);setSaved(true);setTimeout(()=>setSaved(false),3000);
   };
 
