@@ -541,7 +541,15 @@ function PromoteStudents({ students, classes, terms, reload }) {
 }
 
 // ── Manage Students ────────────────────────────────────────────
-function ManageStudents({ students, classes, reload, schoolId }) {
+function ManageStudents({ students, classes, reload, schoolId, school }) {
+  const genAdmNumber = () => {
+    const initials = school && school.name
+      ? school.name.split(" ").filter(w=>w.length>1).map(w=>w[0].toUpperCase()).join("").slice(0,4)
+      : "SCH";
+    const year = new Date().getFullYear();
+    const next = (students.length + 1).toString().padStart(4,"0");
+    return initials + "/" + year + "/" + next;
+  };
   const [form,setForm]=useState({full_name:"",admission_number:"",gender:"",date_of_birth:"",guardian_name:"",guardian_phone:"",class_id:""});
   const [adding,setAdding]=useState(false); const [search,setSearch]=useState("");
   const [saving,setSaving]=useState(false); const [editId,setEditId]=useState(null);
@@ -550,8 +558,14 @@ function ManageStudents({ students, classes, reload, schoolId }) {
     if(!form.full_name.trim()){alert("Student name required");return;}
     if(!form.class_id){alert("Please select a class");return;}
     setSaving(true);
-    if(editId){await db.patch("students",editId,form);setEditId(null);}
-    else await db.post("students",{...form,school_id:schoolId});
+    if(editId){
+      const payload={...form};
+      if(!payload.admission_number.trim()) payload.admission_number=genAdmNumber();
+      await db.patch("students",editId,payload);setEditId(null);
+    } else {
+      const admNo=form.admission_number.trim()||genAdmNumber();
+      await db.post("students",{...form,admission_number:admNo,school_id:schoolId});
+    }
     resetForm();setAdding(false);setSaving(false);reload();
   };
   const startEdit=(s)=>{
@@ -1411,7 +1425,7 @@ function PrincipalDash({ user, onLogout }) {
   return (
     <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/>}
-      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id} school={school}/>}
       {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id}/>}
       {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={school?.id}/>}
