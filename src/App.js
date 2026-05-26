@@ -1613,10 +1613,15 @@ function TeacherDash({ user, onLogout }) {
 
 // ── App Root ───────────────────────────────────────────────────
 export default function App() {
-  const [user,setUser]=useState(null);
+  const [user,setUser]=useState(()=>{
+    try{ const s=localStorage.getItem("school_user"); return s?JSON.parse(s):null; }
+    catch{ return null; }
+  });
+  const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); };
+  const handleLogout=()=>{ localStorage.removeItem("school_user"); setUser(null); };
   return !user
-    ?<Login onLogin={setUser}/>
+    ?<Login onLogin={handleLogin}/>
     :user.role==="principal"
-      ?<PrincipalDash user={user} onLogout={()=>setUser(null)}/>
-      :<TeacherDash user={user} onLogout={()=>setUser(null)}/>;
+      ?<PrincipalDash user={user} onLogout={handleLogout}/>
+      :<TeacherDash user={user} onLogout={handleLogout}/>;
 }
