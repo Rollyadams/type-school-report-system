@@ -58,7 +58,7 @@ export const db = {
       .select()
       .single();
     if (error) {
-      console.error('db.post(' + table + ') error:', error.message);
+      console.error('db.post(' + table + ') error:', error.message, '| hint:', error.hint, '| details:', error.details, '| code:', error.code);
       return null;
     }
     return data;
