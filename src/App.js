@@ -632,19 +632,103 @@ function ManageStudents({ students, classes, reload, schoolId, school }) {
 }
 
 // ── Manage Classes ─────────────────────────────────────────────
-function ManageClasses({ classes, reload, schoolId }) {
+// Custom subjects override: key = class.id, value = string[]
+const customSubjectsStore = {};
+
+function ManageClasses({ classes, reload, schoolId, students, terms }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({name:"",arm:"",level:""});
   const [selectedClass,setSelectedClass]=useState(null);
+  const [customSubjects,setCustomSubjects]=useState({}); // {classId:[...subjects]}
+  const [newSubject,setNewSubject]=useState("");
+  const [autoPromoting,setAutoPromoting]=useState(false);
+  const [autoResult,setAutoResult]=useState(null);
   const levels=Object.keys(NIGERIAN_SUBJECTS);
+
+  // Load custom subjects from localStorage on mount
+  useEffect(()=>{
+    try{const saved=JSON.parse(localStorage.getItem("customSubjects_"+schoolId)||"{}");setCustomSubjects(saved);}catch(e){}
+  },[schoolId]);
+
+  const saveCustomSubjects=(updated)=>{
+    setCustomSubjects(updated);
+    try{localStorage.setItem("customSubjects_"+schoolId,JSON.stringify(updated));}catch(e){}
+  };
+
+  const getSubjects=(cls)=> customSubjects[cls.id] || NIGERIAN_SUBJECTS[cls.name] || [];
+
   const save=async()=>{
     if(!form.name){alert("Please select a class level");return;}
     await db.post("classes",{...form,school_id:schoolId});
     setForm({name:"",arm:"",level:""});setAdding(false);reload();
   };
 
-  // Detail view when a class card is clicked
+  const deleteClass=async(c,e)=>{
+    e.stopPropagation();
+    if(!window.confirm(`Delete "${c.name} ${c.arm||""}"? This cannot be undone.`)) return;
+    await db.delete("classes",c.id); reload();
+  };
+
+  // ── Option B+C: Auto-promote all classes when term ends ──────
+  const runAutoPromotion=async()=>{
+    const currentTerm=terms.find(t=>t.is_current);
+    if(!currentTerm){alert("No current term set. Please set a current term first.");return;}
+    if(!window.confirm(`Auto-promote ALL students for "${currentTerm.name}"?\n\nRules:\n• Avg ≥ 40% = Promoted\n• Avg < 40% = Repeated\n• Must pass English & Maths (avg ≥ 40 each) to promote\n\nThis will update every student's promotion status.`)) return;
+    setAutoPromoting(true); setAutoResult(null);
+    let promoted=0,repeated=0,errors=0;
+    for(const cls of classes){
+      const classStudents=students.filter(s=>s.class_id===cls.id);
+      if(!classStudents.length) continue;
+      const subjects=getSubjects(cls);
+      const nextClassName=getNextClassName(cls.name);
+      const nextClass=nextClassName?classes.find(c=>c.name===nextClassName):null;
+      const ids=classStudents.map(s=>s.id);
+      try{
+        const [results,remarks]=await Promise.all([
+          db.get("results",{term_id:currentTerm.id,student_id:ids}),
+          db.get("remarks",{term_id:currentTerm.id,student_id:ids}),
+        ]);
+        for(const s of classStudents){
+          const total=subjects.reduce((a,sub)=>{const r=results.find(x=>x.student_id===s.id&&x.subject_name===sub);return a+(r?.ca_score||0)+(r?.exam_score||0);},0);
+          const avg=subjects.length?Math.round(total/subjects.length):0;
+          // Rule: must also pass English & Maths individually
+          const engRes=results.find(x=>x.student_id===s.id&&(x.subject_name==="English Language"||x.subject_name==="English"));
+          const mathRes=results.find(x=>x.student_id===s.id&&(x.subject_name==="Mathematics"||x.subject_name==="Maths"));
+          const engScore=engRes?(engRes.ca_score||0)+(engRes.exam_score||0):0;
+          const mathScore=mathRes?(mathRes.ca_score||0)+(mathRes.exam_score||0):0;
+          const passCoreSubjects = engScore>=40 && mathScore>=40;
+          const isFinalClass=!nextClassName;
+          const status=isFinalClass?"Graduated":(avg>=40&&passCoreSubjects?"Promoted":"Repeated");
+          const rem=remarks.find(r=>r.student_id===s.id);
+          if(rem?.id) await db.patch("remarks",rem.id,{promotion_status:status});
+          else await db.post("remarks",{student_id:s.id,term_id:currentTerm.id,promotion_status:status});
+          if(status==="Promoted"&&nextClass) await db.patch("students",s.id,{class_id:nextClass.id});
+          if(status==="Promoted"||status==="Graduated") promoted++; else repeated++;
+        }
+      }catch(e){errors++;}
+    }
+    setAutoPromoting(false);
+    setAutoResult({promoted,repeated,errors,term:currentTerm.name});
+    reload();
+  };
+
+  // ── Detail view: subjects editor ────────────────────────────
   if(selectedClass){
-    const subjects=NIGERIAN_SUBJECTS[selectedClass.name]||[];
+    const subjects=getSubjects(selectedClass);
+    const addSubject=()=>{
+      const s=newSubject.trim();
+      if(!s||subjects.includes(s)){setNewSubject("");return;}
+      const updated={...customSubjects,[selectedClass.id]:[...subjects,s]};
+      saveCustomSubjects(updated); setNewSubject("");
+    };
+    const removeSubject=(sub)=>{
+      const updated={...customSubjects,[selectedClass.id]:subjects.filter(s=>s!==sub)};
+      saveCustomSubjects(updated);
+    };
+    const resetSubjects=()=>{
+      if(!window.confirm("Reset to default subjects for this class?")) return;
+      const updated={...customSubjects}; delete updated[selectedClass.id];
+      saveCustomSubjects(updated);
+    };
     return(
       <div>
         <button onClick={()=>setSelectedClass(null)} style={{...S.btn("#64748b"),marginBottom:16}}>← Back to Classes</button>
@@ -652,13 +736,22 @@ function ManageClasses({ classes, reload, schoolId }) {
           <div style={{fontWeight:800,fontSize:20}}>{selectedClass.name} {selectedClass.arm}</div>
           <div style={{opacity:0.85,fontSize:13,marginTop:4}}>{selectedClass.level} • {subjects.length} Subjects</div>
         </div>
-        <div style={S.section("#0ea5e9")}><span>📚</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Subjects ({subjects.length})</span></div>
-        {subjects.length===0&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No subjects configured for this class.</div>}
-        <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div style={S.section("#0ea5e9")}><span>📚</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Subjects ({subjects.length})</span></div>
+          {customSubjects[selectedClass.id]&&<button onClick={resetSubjects} style={{...S.btn("#94a3b8"),padding:"5px 10px",fontSize:11}}>↺ Reset Default</button>}
+        </div>
+        {/* Add subject input */}
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <input style={{...S.input,flex:1,margin:0}} value={newSubject} onChange={e=>setNewSubject(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSubject()} placeholder="Add new subject…"/>
+          <button onClick={addSubject} style={S.btn("#10b981")}>+ Add</button>
+        </div>
+        {subjects.length===0&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No subjects. Add one above.</div>}
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {subjects.map((sub,i)=>(
-            <div key={sub} style={{...S.card,padding:"12px 16px",marginBottom:0,display:"flex",alignItems:"center",gap:12}}>
-              <div style={{background:"#e0f2fe",color:"#0ea5e9",fontWeight:800,fontSize:13,borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</div>
-              <div style={{fontWeight:600,color:"#1e293b",fontSize:14}}>{sub}</div>
+            <div key={sub} style={{...S.card,padding:"10px 14px",marginBottom:0,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{background:"#e0f2fe",color:"#0ea5e9",fontWeight:800,fontSize:12,borderRadius:8,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</div>
+              <div style={{fontWeight:600,color:"#1e293b",fontSize:14,flex:1}}>{sub}</div>
+              <button onClick={()=>removeSubject(sub)} style={{background:"#fee2e2",border:"none",borderRadius:8,color:"#ef4444",padding:"4px 10px",cursor:"pointer",fontSize:12,fontWeight:700}}>✕</button>
             </div>
           ))}
         </div>
@@ -672,6 +765,22 @@ function ManageClasses({ classes, reload, schoolId }) {
         <div style={S.section("#0ea5e9")}><span>🏫</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Classes ({classes.length})</span></div>
         <button onClick={()=>setAdding(!adding)} style={S.btn("#0ea5e9")}>{adding?"Cancel":"+ Add Class"}</button>
       </div>
+
+      {/* Option B+C: Auto-Promotion Panel */}
+      <div style={{...S.card,background:"linear-gradient(135deg,#fef3c7,#fffbeb)",border:"1.5px solid #f59e0b",marginBottom:16,padding:16}}>
+        <div style={{fontWeight:800,color:"#92400e",fontSize:14,marginBottom:6}}>🤖 Auto-Promotion Engine</div>
+        <div style={{fontSize:12,color:"#78350f",marginBottom:10,lineHeight:1.5}}>Runs promotion for <strong>all classes</strong> using the current term. Rules: Avg ≥ 40% + pass English & Maths individually = Promoted. Final class = Graduated.</div>
+        {autoResult&&(
+          <div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
+            <div style={{fontWeight:800,color:"#065f46"}}>✅ Done for {autoResult.term}</div>
+            <div style={{color:"#064e3b",marginTop:4}}>🎓 Promoted/Graduated: <strong>{autoResult.promoted}</strong> &nbsp;•&nbsp; 🔁 Repeated: <strong>{autoResult.repeated}</strong>{autoResult.errors>0&&<span style={{color:"#dc2626"}}> &nbsp;•&nbsp; ⚠️ Errors: {autoResult.errors}</span>}</div>
+          </div>
+        )}
+        <button onClick={runAutoPromotion} disabled={autoPromoting} style={{...S.btn("#f59e0b"),width:"100%",padding:"11px",fontSize:13}}>
+          {autoPromoting?"⏳ Promoting all students…":"🚀 Run Auto-Promotion for Current Term"}
+        </button>
+      </div>
+
       {adding&&(
         <div style={S.card}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
@@ -685,12 +794,16 @@ function ManageClasses({ classes, reload, schoolId }) {
       {classes.length===0&&!adding&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No classes yet.</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         {classes.map(c=>(
-          <div key={c.id} onClick={()=>setSelectedClass(c)} style={{...S.card,padding:"14px 16px",marginBottom:0,cursor:"pointer",transition:"transform 0.15s, box-shadow 0.15s"}}
-            onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.02)";e.currentTarget.style.boxShadow="0 4px 24px #0ea5e920";}}
-            onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="";}}>
-            <div style={{fontWeight:800,color:"#1e293b",fontSize:16}}>{c.name} {c.arm}</div>
-            <div style={{fontSize:12,color:"#64748b",marginTop:4}}>{c.level}</div>
-            <div style={{fontSize:11,color:"#0ea5e9",marginTop:4,fontWeight:600}}>{(NIGERIAN_SUBJECTS[c.name]||[]).length} subjects →</div>
+          <div key={c.id} style={{position:"relative"}}>
+            <div onClick={()=>setSelectedClass(c)} style={{...S.card,padding:"14px 16px",marginBottom:0,cursor:"pointer",transition:"transform 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.02)";}}
+              onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";}}>
+              <div style={{fontWeight:800,color:"#1e293b",fontSize:15,paddingRight:24}}>{c.name} {c.arm}</div>
+              <div style={{fontSize:12,color:"#64748b",marginTop:3}}>{c.level}</div>
+              <div style={{fontSize:11,color:"#0ea5e9",marginTop:3,fontWeight:600}}>{getSubjects(c).length} subjects →</div>
+            </div>
+            <button onClick={(e)=>deleteClass(c,e)} title="Delete class"
+              style={{position:"absolute",top:8,right:8,background:"#fee2e2",border:"none",borderRadius:6,color:"#ef4444",width:22,height:22,cursor:"pointer",fontSize:13,fontWeight:900,lineHeight:"22px",textAlign:"center",padding:0}}>×</button>
           </div>
         ))}
       </div>
@@ -1454,7 +1567,7 @@ function PrincipalDash({ user, onLogout }) {
     <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/>}
       {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id} school={school}/>}
-      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id} students={students} terms={terms}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id}/>}
       {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={school?.id}/>}
       {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
