@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, supabase, activateUserContext } from './supabaseClient';
 
 const NIGERIAN_SUBJECTS = {
@@ -196,7 +196,49 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   doc.save(`${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`);
 };
 
-// ── Login (Staff + Parent Result Checker) ─────────────────────
+// ── Rate Limiter (client-side) ────────────────────────────────
+// Tracks failed login attempts per email in localStorage.
+// Max 5 attempts, then 15-minute lockout.
+const RATE_LIMIT_MAX = 5;
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function getRateLimit(email) {
+  try {
+    const raw = localStorage.getItem("rl_" + email);
+    return raw ? JSON.parse(raw) : { count: 0, firstAttempt: null, lockedUntil: null };
+  } catch { return { count: 0, firstAttempt: null, lockedUntil: null }; }
+}
+function setRateLimit(email, data) {
+  try { localStorage.setItem("rl_" + email, JSON.stringify(data)); } catch {}
+}
+function clearRateLimit(email) {
+  try { localStorage.removeItem("rl_" + email); } catch {}
+}
+function checkRateLimit(email) {
+  const rl = getRateLimit(email);
+  const now = Date.now();
+  if (rl.lockedUntil && now < rl.lockedUntil) {
+    const mins = Math.ceil((rl.lockedUntil - now) / 60000);
+    return { blocked: true, message: `Too many failed attempts. Try again in ${mins} minute${mins>1?"s":""}.` };
+  }
+  // Reset if window expired
+  if (rl.firstAttempt && now - rl.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+    clearRateLimit(email);
+    return { blocked: false };
+  }
+  return { blocked: false };
+}
+function recordFailedAttempt(email) {
+  const rl = getRateLimit(email);
+  const now = Date.now();
+  const count = rl.count + 1;
+  const firstAttempt = rl.firstAttempt || now;
+  const lockedUntil = count >= RATE_LIMIT_MAX ? now + RATE_LIMIT_WINDOW_MS : null;
+  setRateLimit(email, { count, firstAttempt, lockedUntil });
+  return { count, lockedUntil };
+}
+
+
 function Login({ onLogin, onRegister }) {
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
@@ -206,11 +248,26 @@ function Login({ onLogin, onRegister }) {
 
   const login = async () => {
     if(!email||!pass){setErr("Please enter email and password");return;}
+    // Rate limit check
+    const rl = checkRateLimit(email);
+    if(rl.blocked){setErr(rl.message);return;}
     setLoading(true);setErr("");
     try{
       const users=await db.get("users",{email});
-      if(!users.length){setErr("User not found");setLoading(false);return;}
-      if(pass!==users[0].password){setErr("Incorrect password");setLoading(false);return;}
+      if(!users.length){
+        recordFailedAttempt(email);
+        setErr("User not found");setLoading(false);return;
+      }
+      if(pass!==users[0].password){
+        const {count,lockedUntil}=recordFailedAttempt(email);
+        const remaining=RATE_LIMIT_MAX-count;
+        setErr(lockedUntil
+          ?"Too many failed attempts. Account locked for 15 minutes."
+          :`Incorrect password. ${remaining} attempt${remaining!==1?"s":""} remaining.`
+        );
+        setLoading(false);return;
+      }
+      clearRateLimit(email);
       await activateUserContext(users[0].id);
       onLogin(users[0]);
     }catch(e){setErr("Connection error. Try again.");}
@@ -1857,20 +1914,58 @@ function Register({ onRegistered }) {
 }
 
 // ── App Root ───────────────────────────────────────────────────
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 export default function App() {
   const [user,setUser]=useState(()=>{
     try{ const s=localStorage.getItem("school_user"); return s?JSON.parse(s):null; }
     catch{ return null; }
   });
   const [screen,setScreen]=useState("login");
+  const [showTimeoutWarning,setShowTimeoutWarning]=useState(false);
+  const timeoutRef=useRef(null);
+  const warningRef=useRef(null);
 
   const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); };
-  const handleLogout=()=>{ localStorage.removeItem("school_user"); setUser(null); setScreen("login"); };
+  const handleLogout=()=>{ localStorage.removeItem("school_user"); setUser(null); setScreen("login"); setShowTimeoutWarning(false); };
   const handleRegistered=(u)=>{ if(u){ setUser(u); } else { setScreen("login"); } };
 
-  if(user) return user.role==="principal"
-    ?<PrincipalDash user={user} onLogout={handleLogout}/>
-    :<TeacherDash user={user} onLogout={handleLogout}/>;
+  // Reset inactivity timer on any user activity
+  const resetTimer=useCallback(()=>{
+    if(!user) return;
+    setShowTimeoutWarning(false);
+    clearTimeout(timeoutRef.current);
+    clearTimeout(warningRef.current);
+    // Show warning 1 minute before logout
+    warningRef.current=setTimeout(()=>setShowTimeoutWarning(true), INACTIVITY_TIMEOUT_MS - 60000);
+    timeoutRef.current=setTimeout(()=>handleLogout(), INACTIVITY_TIMEOUT_MS);
+  },[user]);
+
+  useEffect(()=>{
+    if(!user){ clearTimeout(timeoutRef.current); clearTimeout(warningRef.current); return; }
+    const events=["mousedown","mousemove","keydown","touchstart","scroll","click"];
+    events.forEach(e=>window.addEventListener(e,resetTimer,{passive:true}));
+    resetTimer();
+    return()=>{
+      events.forEach(e=>window.removeEventListener(e,resetTimer));
+      clearTimeout(timeoutRef.current);
+      clearTimeout(warningRef.current);
+    };
+  },[user,resetTimer]);
+
+  if(user) return(
+    <>
+      {showTimeoutWarning&&(
+        <div style={{position:"fixed",bottom:80,left:"50%",transform:"translateX(-50%)",background:"#1e3a8a",color:"#fff",borderRadius:12,padding:"12px 20px",zIndex:9999,fontSize:13,fontWeight:700,boxShadow:"0 4px 20px #0000004a",display:"flex",gap:12,alignItems:"center",whiteSpace:"nowrap"}}>
+          ⏱️ Session expiring in 1 minute
+          <button onClick={resetTimer} style={{background:"#fff",color:"#1e3a8a",border:"none",borderRadius:8,padding:"4px 12px",fontWeight:800,cursor:"pointer",fontSize:12}}>Stay Logged In</button>
+        </div>
+      )}
+      {user.role==="principal"
+        ?<PrincipalDash user={user} onLogout={handleLogout}/>
+        :<TeacherDash user={user} onLogout={handleLogout}/>}
+    </>
+  );
 
   if(screen==="register") return <Register onRegistered={handleRegistered}/>;
 
