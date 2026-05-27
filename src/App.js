@@ -634,12 +634,38 @@ function ManageStudents({ students, classes, reload, schoolId, school }) {
 // ── Manage Classes ─────────────────────────────────────────────
 function ManageClasses({ classes, reload, schoolId }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({name:"",arm:"",level:""});
+  const [selectedClass,setSelectedClass]=useState(null);
   const levels=Object.keys(NIGERIAN_SUBJECTS);
   const save=async()=>{
     if(!form.name){alert("Please select a class level");return;}
     await db.post("classes",{...form,school_id:schoolId});
     setForm({name:"",arm:"",level:""});setAdding(false);reload();
   };
+
+  // Detail view when a class card is clicked
+  if(selectedClass){
+    const subjects=NIGERIAN_SUBJECTS[selectedClass.name]||[];
+    return(
+      <div>
+        <button onClick={()=>setSelectedClass(null)} style={{...S.btn("#64748b"),marginBottom:16}}>← Back to Classes</button>
+        <div style={{...S.card,background:"linear-gradient(135deg,#0ea5e9,#0284c7)",color:"#fff",marginBottom:16}}>
+          <div style={{fontWeight:800,fontSize:20}}>{selectedClass.name} {selectedClass.arm}</div>
+          <div style={{opacity:0.85,fontSize:13,marginTop:4}}>{selectedClass.level} • {subjects.length} Subjects</div>
+        </div>
+        <div style={S.section("#0ea5e9")}><span>📚</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Subjects ({subjects.length})</span></div>
+        {subjects.length===0&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No subjects configured for this class.</div>}
+        <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+          {subjects.map((sub,i)=>(
+            <div key={sub} style={{...S.card,padding:"12px 16px",marginBottom:0,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{background:"#e0f2fe",color:"#0ea5e9",fontWeight:800,fontSize:13,borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{i+1}</div>
+              <div style={{fontWeight:600,color:"#1e293b",fontSize:14}}>{sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -659,10 +685,12 @@ function ManageClasses({ classes, reload, schoolId }) {
       {classes.length===0&&!adding&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No classes yet.</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         {classes.map(c=>(
-          <div key={c.id} style={{...S.card,padding:"14px 16px",marginBottom:0}}>
+          <div key={c.id} onClick={()=>setSelectedClass(c)} style={{...S.card,padding:"14px 16px",marginBottom:0,cursor:"pointer",transition:"transform 0.15s, box-shadow 0.15s"}}
+            onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.02)";e.currentTarget.style.boxShadow="0 4px 24px #0ea5e920";}}
+            onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="";}}>
             <div style={{fontWeight:800,color:"#1e293b",fontSize:16}}>{c.name} {c.arm}</div>
             <div style={{fontSize:12,color:"#64748b",marginTop:4}}>{c.level}</div>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>{(NIGERIAN_SUBJECTS[c.name]||[]).length} subjects</div>
+            <div style={{fontSize:11,color:"#0ea5e9",marginTop:4,fontWeight:600}}>{(NIGERIAN_SUBJECTS[c.name]||[]).length} subjects →</div>
           </div>
         ))}
       </div>
