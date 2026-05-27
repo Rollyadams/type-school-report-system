@@ -210,7 +210,7 @@ function Login({ onLogin, onRegister }) {
     try{
       const users=await db.get("users",{email});
       if(!users.length){setErr("User not found");setLoading(false);return;}
-      if(pass!=="school1234"){setErr("Incorrect password");setLoading(false);return;}
+      if(pass!==users[0].password){setErr("Incorrect password");setLoading(false);return;}
       await activateUserContext(users[0].id);
       onLogin(users[0]);
     }catch(e){setErr("Connection error. Try again.");}
@@ -261,7 +261,6 @@ function Login({ onLogin, onRegister }) {
             <div style={{marginBottom:20}}><label style={S.label}>Password</label><input style={S.input} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()} placeholder="••••••••" type="password"/></div>
             {err&&<div style={{color:"#ef4444",fontSize:13,marginBottom:12,textAlign:"center"}}>{err}</div>}
             <button onClick={login} disabled={loading} style={{...S.btn(),width:"100%",padding:"13px",fontSize:15}}>{loading?"Signing in…":"Sign In →"}</button>
-            <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:16}}>Default password: <strong>school1234</strong></p>
           </>
         ):(
           <>
@@ -271,9 +270,9 @@ function Login({ onLogin, onRegister }) {
             <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number to view current term result.</p>
           </>
         )}
-        <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:20,borderTop:"1px solid #f1f5f9",paddingTop:16}}>
+        <p style={{textAlign:"center",color:"#94a3b8",fontSize:13,marginTop:20,borderTop:"1px solid #f1f5f9",paddingTop:16}}>
           New school?{" "}
-          <span onClick={onRegister} style={{color:"#1e3a8a",fontWeight:700,cursor:"pointer"}}>Register here →</span>
+          <span onClick={onRegister} style={{color:"#1e3a8a",fontWeight:800,fontSize:14,cursor:"pointer",textDecoration:"underline"}}>Register here →</span>
         </p>
       </div>
     </div>
