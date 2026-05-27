@@ -1849,7 +1849,7 @@ function Register({ onRegistered }) {
       const existing=await db.get("schools",{email:school.email.trim()});
       if(existing.length){setErr("A school with this email already exists.");setLoading(false);return;}
       const newSchool=await db.post("schools",{name:school.name.trim(),address:school.address.trim(),phone:school.phone.trim(),email:school.email.trim()});
-      if(!newSchool){setErr("Failed to create school. Try again.");setLoading(false);return;}
+      if(!newSchool){setErr("Failed to create school. Check browser console for details.");setLoading(false);return;}
       const newUser=await db.post("users",{full_name:admin.full_name.trim(),email:admin.email.trim().toLowerCase(),password:admin.password,role:"principal",school_id:newSchool.id});
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
