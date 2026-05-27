@@ -196,46 +196,35 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   doc.save(`${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`);
 };
 
-// ── Rate Limiter (client-side) ────────────────────────────────
-// Tracks failed login attempts per email in localStorage.
-// Max 5 attempts, then 15-minute lockout.
+// ── Rate Limiter (Supabase-backed — works across all devices) ─
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 
-function getRateLimit(email) {
+async function checkRateLimit(email) {
   try {
-    const raw = localStorage.getItem("rl_" + email);
-    return raw ? JSON.parse(raw) : { count: 0, firstAttempt: null, lockedUntil: null };
-  } catch { return { count: 0, firstAttempt: null, lockedUntil: null }; }
+    const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
+    const { data, error } = await supabase
+      .from("login_attempts")
+      .select("id, attempted_at")
+      .eq("email", email.toLowerCase())
+      .eq("success", false)
+      .gte("attempted_at", windowStart)
+      .order("attempted_at", { ascending: false });
+    if (error) return { blocked: false }; // fail open if table missing
+    if (data.length >= RATE_LIMIT_MAX) {
+      const oldest = new Date(data[data.length - 1].attempted_at).getTime();
+      const unlockAt = oldest + RATE_LIMIT_WINDOW_MS;
+      const mins = Math.ceil((unlockAt - Date.now()) / 60000);
+      return { blocked: true, message: `Too many failed attempts. Try again in ${mins} minute${mins!==1?"s":""}.` };
+    }
+    return { blocked: false, remaining: RATE_LIMIT_MAX - data.length };
+  } catch { return { blocked: false }; }
 }
-function setRateLimit(email, data) {
-  try { localStorage.setItem("rl_" + email, JSON.stringify(data)); } catch {}
-}
-function clearRateLimit(email) {
-  try { localStorage.removeItem("rl_" + email); } catch {}
-}
-function checkRateLimit(email) {
-  const rl = getRateLimit(email);
-  const now = Date.now();
-  if (rl.lockedUntil && now < rl.lockedUntil) {
-    const mins = Math.ceil((rl.lockedUntil - now) / 60000);
-    return { blocked: true, message: `Too many failed attempts. Try again in ${mins} minute${mins>1?"s":""}.` };
-  }
-  // Reset if window expired
-  if (rl.firstAttempt && now - rl.firstAttempt > RATE_LIMIT_WINDOW_MS) {
-    clearRateLimit(email);
-    return { blocked: false };
-  }
-  return { blocked: false };
-}
-function recordFailedAttempt(email) {
-  const rl = getRateLimit(email);
-  const now = Date.now();
-  const count = rl.count + 1;
-  const firstAttempt = rl.firstAttempt || now;
-  const lockedUntil = count >= RATE_LIMIT_MAX ? now + RATE_LIMIT_WINDOW_MS : null;
-  setRateLimit(email, { count, firstAttempt, lockedUntil });
-  return { count, lockedUntil };
+
+async function recordLoginAttempt(email, success) {
+  try {
+    await supabase.from("login_attempts").insert({ email: email.toLowerCase(), success });
+  } catch {}
 }
 
 
@@ -248,26 +237,26 @@ function Login({ onLogin, onRegister }) {
 
   const login = async () => {
     if(!email||!pass){setErr("Please enter email and password");return;}
-    // Rate limit check
-    const rl = checkRateLimit(email);
+    const rl = await checkRateLimit(email);
     if(rl.blocked){setErr(rl.message);return;}
     setLoading(true);setErr("");
     try{
       const users=await db.get("users",{email});
       if(!users.length){
-        recordFailedAttempt(email);
+        await recordLoginAttempt(email, false);
         setErr("User not found");setLoading(false);return;
       }
+      if(!users[0].password){setErr("No password set for this account. Contact your administrator.");await recordLoginAttempt(email,false);setLoading(false);return;}
       if(pass!==users[0].password){
-        const {count,lockedUntil}=recordFailedAttempt(email);
-        const remaining=RATE_LIMIT_MAX-count;
-        setErr(lockedUntil
-          ?"Too many failed attempts. Account locked for 15 minutes."
-          :`Incorrect password. ${remaining} attempt${remaining!==1?"s":""} remaining.`
+        await recordLoginAttempt(email, false);
+        const rl2 = await checkRateLimit(email);
+        setErr(rl2.blocked
+          ? "Too many failed attempts. Account locked for 15 minutes."
+          : `Incorrect password. ${rl2.remaining} attempt${rl2.remaining!==1?"s":""} remaining.`
         );
         setLoading(false);return;
       }
-      clearRateLimit(email);
+      await recordLoginAttempt(email, true);
       await activateUserContext(users[0].id);
       onLogin(users[0]);
     }catch(e){setErr("Connection error. Try again.");}
