@@ -1816,6 +1816,16 @@ function TeacherDash({ user, onLogout }) {
   );
 }
 
+// ── Stable form field — defined OUTSIDE Register to prevent remount on keystroke ──
+function FormField({label,value,onChange,type="text",placeholder}){
+  return(
+    <div style={{marginBottom:14}}>
+      <label style={S.label}>{label}</label>
+      <input style={S.input} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
+    </div>
+  );
+}
+
 // ── School Registration ────────────────────────────────────────
 function Register({ onRegistered }) {
   const [step,setStep]=useState(1);
@@ -1849,12 +1859,7 @@ function Register({ onRegistered }) {
     setLoading(false);
   };
 
-  const F=({label,value,onChange,type="text",placeholder})=>(
-    <div style={{marginBottom:14}}>
-      <label style={S.label}>{label}</label>
-      <input style={S.input} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
-    </div>
-  );
+  
 
   return(
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1e3a8a,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -1875,18 +1880,18 @@ function Register({ onRegistered }) {
         {err&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",color:"#dc2626",fontSize:13,marginBottom:16}}>{err}</div>}
         {step===1?(
           <>
-            <F label="School Name *" value={school.name} onChange={v=>setSchool(p=>({...p,name:v}))} placeholder="e.g. Greenfield Academy"/>
-            <F label="School Email *" value={school.email} onChange={v=>setSchool(p=>({...p,email:v}))} type="email" placeholder="admin@greenfieldacademy.com"/>
-            <F label="Phone Number" value={school.phone} onChange={v=>setSchool(p=>({...p,phone:v}))} placeholder="e.g. 08012345678"/>
-            <F label="Address" value={school.address} onChange={v=>setSchool(p=>({...p,address:v}))} placeholder="School address"/>
+            <FormField label="School Name *" value={school.name} onChange={v=>setSchool(p=>({...p,name:v}))} placeholder="e.g. Greenfield Academy"/>
+            <FormField label="School Email *" value={school.email} onChange={v=>setSchool(p=>({...p,email:v}))} type="email" placeholder="admin@greenfieldacademy.com"/>
+            <FormField label="Phone Number" value={school.phone} onChange={v=>setSchool(p=>({...p,phone:v}))} placeholder="e.g. 08012345678"/>
+            <FormField label="Address" value={school.address} onChange={v=>setSchool(p=>({...p,address:v}))} placeholder="School address"/>
             <button onClick={nextStep} style={{...S.btn(),width:"100%",padding:"13px",fontSize:15,marginTop:4}}>Next →</button>
           </>
         ):(
           <>
-            <F label="Principal's Full Name *" value={admin.full_name} onChange={v=>setAdmin(p=>({...p,full_name:v}))} placeholder="e.g. Mrs. Adaeze Okafor"/>
-            <F label="Login Email *" value={admin.email} onChange={v=>setAdmin(p=>({...p,email:v}))} type="email" placeholder="principal@email.com"/>
-            <F label="Password *" value={admin.password} onChange={v=>setAdmin(p=>({...p,password:v}))} type="password" placeholder="Min. 6 characters"/>
-            <F label="Confirm Password *" value={admin.confirm} onChange={v=>setAdmin(p=>({...p,confirm:v}))} type="password" placeholder="Repeat password"/>
+            <FormField label="Principal's Full Name *" value={admin.full_name} onChange={v=>setAdmin(p=>({...p,full_name:v}))} placeholder="e.g. Mrs. Adaeze Okafor"/>
+            <FormField label="Login Email *" value={admin.email} onChange={v=>setAdmin(p=>({...p,email:v}))} type="email" placeholder="principal@email.com"/>
+            <FormField label="Password *" value={admin.password} onChange={v=>setAdmin(p=>({...p,password:v}))} type="password" placeholder="Min. 6 characters"/>
+            <FormField label="Confirm Password *" value={admin.confirm} onChange={v=>setAdmin(p=>({...p,confirm:v}))} type="password" placeholder="Repeat password"/>
             <div style={{display:"flex",gap:10,marginTop:4}}>
               <button onClick={()=>{setStep(1);setErr("");}} style={{...S.btn("#64748b"),flex:1,padding:"13px",fontSize:14}}>← Back</button>
               <button onClick={register} disabled={loading} style={{...S.btn(),flex:2,padding:"13px",fontSize:15}}>{loading?"Creating account…":"Register School 🎉"}</button>
