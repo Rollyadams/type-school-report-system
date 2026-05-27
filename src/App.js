@@ -197,7 +197,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
 };
 
 // ── Login (Staff + Parent Result Checker) ─────────────────────
-function Login({ onLogin }) {
+function Login({ onLogin, onRegister }) {
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const [mode,setMode]=useState("staff");
@@ -271,6 +271,10 @@ function Login({ onLogin }) {
             <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number to view current term result.</p>
           </>
         )}
+        <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:20,borderTop:"1px solid #f1f5f9",paddingTop:16}}>
+          New school?{" "}
+          <span onClick={onRegister} style={{color:"#1e3a8a",fontWeight:700,cursor:"pointer"}}>Register here →</span>
+        </p>
       </div>
     </div>
   );
@@ -1767,17 +1771,109 @@ function TeacherDash({ user, onLogout }) {
   );
 }
 
+// ── School Registration ────────────────────────────────────────
+function Register({ onRegistered }) {
+  const [step,setStep]=useState(1);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [school,setSchool]=useState({name:"",address:"",phone:"",email:""});
+  const [admin,setAdmin]=useState({full_name:"",email:"",password:"",confirm:""});
+
+  const nextStep=()=>{
+    if(!school.name.trim()){setErr("School name is required");return;}
+    if(!school.email.trim()){setErr("School email is required");return;}
+    setErr("");setStep(2);
+  };
+
+  const register=async()=>{
+    if(!admin.full_name.trim()||!admin.email.trim()||!admin.password.trim()){setErr("All fields required");return;}
+    if(admin.password!==admin.confirm){setErr("Passwords do not match");return;}
+    if(admin.password.length<6){setErr("Password must be at least 6 characters");return;}
+    setLoading(true);setErr("");
+    try{
+      const existing=await db.get("schools",{email:school.email.trim()});
+      if(existing.length){setErr("A school with this email already exists.");setLoading(false);return;}
+      const newSchool=await db.post("schools",{name:school.name.trim(),address:school.address.trim(),phone:school.phone.trim(),email:school.email.trim()});
+      if(!newSchool){setErr("Failed to create school. Try again.");setLoading(false);return;}
+      const newUser=await db.post("users",{full_name:admin.full_name.trim(),email:admin.email.trim().toLowerCase(),password:admin.password,role:"principal",school_id:newSchool.id});
+      if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
+      await activateUserContext(newUser.id);
+      localStorage.setItem("school_user",JSON.stringify(newUser));
+      onRegistered(newUser);
+    }catch(e){setErr("Registration failed. Check your connection and try again.");}
+    setLoading(false);
+  };
+
+  const F=({label,value,onChange,type="text",placeholder})=>(
+    <div style={{marginBottom:14}}>
+      <label style={S.label}>{label}</label>
+      <input style={S.input} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}/>
+    </div>
+  );
+
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1e3a8a,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#fff",borderRadius:24,padding:32,width:"100%",maxWidth:420,boxShadow:"0 20px 60px #0000003a"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:44,marginBottom:6}}>🏫</div>
+          <h1 style={{margin:0,fontSize:20,fontWeight:900,color:"#1e3a8a"}}>Register Your School</h1>
+          <p style={{margin:"6px 0 0",color:"#64748b",fontSize:13}}>Set up your school in under 2 minutes</p>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:24}}>
+          {[["1","School Info"],["2","Admin Account"]].map(([n,l])=>(
+            <div key={n} style={{flex:1,textAlign:"center"}}>
+              <div style={{width:28,height:28,borderRadius:"50%",background:step>=Number(n)?"#1e3a8a":"#e2e8f0",color:step>=Number(n)?"#fff":"#94a3b8",fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 4px"}}>{n}</div>
+              <div style={{fontSize:11,color:step>=Number(n)?"#1e3a8a":"#94a3b8",fontWeight:600}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        {err&&<div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"10px 14px",color:"#dc2626",fontSize:13,marginBottom:16}}>{err}</div>}
+        {step===1?(
+          <>
+            <F label="School Name *" value={school.name} onChange={v=>setSchool(p=>({...p,name:v}))} placeholder="e.g. Greenfield Academy"/>
+            <F label="School Email *" value={school.email} onChange={v=>setSchool(p=>({...p,email:v}))} type="email" placeholder="admin@greenfieldacademy.com"/>
+            <F label="Phone Number" value={school.phone} onChange={v=>setSchool(p=>({...p,phone:v}))} placeholder="e.g. 08012345678"/>
+            <F label="Address" value={school.address} onChange={v=>setSchool(p=>({...p,address:v}))} placeholder="School address"/>
+            <button onClick={nextStep} style={{...S.btn(),width:"100%",padding:"13px",fontSize:15,marginTop:4}}>Next →</button>
+          </>
+        ):(
+          <>
+            <F label="Principal's Full Name *" value={admin.full_name} onChange={v=>setAdmin(p=>({...p,full_name:v}))} placeholder="e.g. Mrs. Adaeze Okafor"/>
+            <F label="Login Email *" value={admin.email} onChange={v=>setAdmin(p=>({...p,email:v}))} type="email" placeholder="principal@email.com"/>
+            <F label="Password *" value={admin.password} onChange={v=>setAdmin(p=>({...p,password:v}))} type="password" placeholder="Min. 6 characters"/>
+            <F label="Confirm Password *" value={admin.confirm} onChange={v=>setAdmin(p=>({...p,confirm:v}))} type="password" placeholder="Repeat password"/>
+            <div style={{display:"flex",gap:10,marginTop:4}}>
+              <button onClick={()=>{setStep(1);setErr("");}} style={{...S.btn("#64748b"),flex:1,padding:"13px",fontSize:14}}>← Back</button>
+              <button onClick={register} disabled={loading} style={{...S.btn(),flex:2,padding:"13px",fontSize:15}}>{loading?"Creating account…":"Register School 🎉"}</button>
+            </div>
+          </>
+        )}
+        <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:20}}>
+          Already registered?{" "}
+          <span onClick={()=>onRegistered(null)} style={{color:"#1e3a8a",fontWeight:700,cursor:"pointer"}}>Sign in here</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── App Root ───────────────────────────────────────────────────
 export default function App() {
   const [user,setUser]=useState(()=>{
     try{ const s=localStorage.getItem("school_user"); return s?JSON.parse(s):null; }
     catch{ return null; }
   });
+  const [screen,setScreen]=useState("login");
+
   const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); };
-  const handleLogout=()=>{ localStorage.removeItem("school_user"); setUser(null); };
-  return !user
-    ?<Login onLogin={handleLogin}/>
-    :user.role==="principal"
-      ?<PrincipalDash user={user} onLogout={handleLogout}/>
-      :<TeacherDash user={user} onLogout={handleLogout}/>;
+  const handleLogout=()=>{ localStorage.removeItem("school_user"); setUser(null); setScreen("login"); };
+  const handleRegistered=(u)=>{ if(u){ setUser(u); } else { setScreen("login"); } };
+
+  if(user) return user.role==="principal"
+    ?<PrincipalDash user={user} onLogout={handleLogout}/>
+    :<TeacherDash user={user} onLogout={handleLogout}/>;
+
+  if(screen==="register") return <Register onRegistered={handleRegistered}/>;
+
+  return <Login onLogin={handleLogin} onRegister={()=>setScreen("register")}/>;
 }
