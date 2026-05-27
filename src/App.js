@@ -672,6 +672,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms }) {
   const runAutoPromotion=async()=>{
     const currentTerm=terms.find(t=>t.is_current);
     if(!currentTerm){alert("No current term set. Please set a current term first.");return;}
+    if(!currentTerm.name.toLowerCase().includes("third")){alert(`Auto-promotion only runs in Third Term.\n\nCurrent term is "${currentTerm.name}". Please set Third Term as current first.`);return;}
     if(!window.confirm(`Auto-promote ALL students for "${currentTerm.name}"?\n\nRules:\n• Avg ≥ 40% = Promoted\n• Avg < 40% = Repeated\n• Must pass English & Maths (avg ≥ 40 each) to promote\n\nThis will update every student's promotion status.`)) return;
     setAutoPromoting(true); setAutoResult(null);
     let promoted=0,repeated=0,errors=0;
@@ -769,7 +770,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms }) {
       {/* Option B+C: Auto-Promotion Panel */}
       <div style={{...S.card,background:"linear-gradient(135deg,#fef3c7,#fffbeb)",border:"1.5px solid #f59e0b",marginBottom:16,padding:16}}>
         <div style={{fontWeight:800,color:"#92400e",fontSize:14,marginBottom:6}}>🤖 Auto-Promotion Engine</div>
-        <div style={{fontSize:12,color:"#78350f",marginBottom:10,lineHeight:1.5}}>Runs promotion for <strong>all classes</strong> using the current term. Rules: Avg ≥ 40% + pass English & Maths individually = Promoted. Final class = Graduated.</div>
+        <div style={{fontSize:12,color:"#78350f",marginBottom:10,lineHeight:1.5}}>Runs promotion for <strong>all classes</strong> using the current term. <strong>Only works in Third Term.</strong> Rules: Avg ≥ 40% + pass English & Maths individually = Promoted. Final class = Graduated.</div>
         {autoResult&&(
           <div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
             <div style={{fontWeight:800,color:"#065f46"}}>✅ Done for {autoResult.term}</div>
