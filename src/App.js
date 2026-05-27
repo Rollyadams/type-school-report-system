@@ -1597,7 +1597,15 @@ function PrincipalDash({ user, onLogout }) {
   useEffect(()=>{loadAll();},[]);
   const loadAll=async()=>{
     setLoading(true);
-    const [s,c,t,se,te,sc]=await Promise.all([db.get("students"),db.get("classes"),db.get("users",{role:"teacher"}),db.get("sessions"),db.get("terms"),db.get("schools")]);
+    const sc=await db.get("schools",{id:user.school_id});
+    const schoolId=user.school_id;
+    const [s,c,t,se,te]=await Promise.all([
+      db.get("students",{school_id:schoolId}),
+      db.get("classes",{school_id:schoolId}),
+      db.get("users",{role:"teacher",school_id:schoolId}),
+      db.get("sessions",{school_id:schoolId}),
+      db.get("terms",{school_id:schoolId}),
+    ]);
     setStudents(s);setClasses(c);setTeachers(t);setSessions(se);setTerms(te);setSchool(sc[0]||null);setLoading(false);
   };
 
@@ -1646,7 +1654,12 @@ function TeacherDash({ user, onLogout }) {
   useEffect(()=>{loadData();},[]);
   const loadData=async()=>{
     setLoading(true);
-    const [c,t,sc]=await Promise.all([db.get("classes"),db.get("terms"),db.get("schools")]);
+    const schoolId=user.school_id;
+    const [c,t,sc]=await Promise.all([
+      db.get("classes",{school_id:schoolId}),
+      db.get("terms",{school_id:schoolId}),
+      db.get("schools",{id:schoolId}),
+    ]);
     const schoolData=sc[0]||null; setSchool(schoolData); setTerms(t);
     const curr=t.find(t=>t.is_current); if(curr) setSelectedTerm(curr.id);
     if(user.class_id){setClasses(c.filter(cls=>cls.id===user.class_id));setSelectedClass(user.class_id);}
