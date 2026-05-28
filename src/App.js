@@ -1792,7 +1792,7 @@ function TeacherDash({ user, onLogout }) {
     setSelectedStudent(null);
   },[selectedClass]);
 
-  useEffect(()=>{if(selectedStudent&&selectedTerm) loadStudentData();},[selectedStudent,selectedTerm]);
+  useEffect(()=>{setSaved(false);if(selectedStudent&&selectedTerm) loadStudentData();},[selectedStudent,selectedTerm]);
 
   const loadStudentData=async()=>{
     const [r,a,rem]=await Promise.all([
@@ -1803,6 +1803,7 @@ function TeacherDash({ user, onLogout }) {
     const sc={};
     r.forEach(res=>{sc[res.subject_name]={ca:res.ca_score,exam:res.exam_score,id:res.id};});
     setScores(sc);setCurrentResults(r);
+    if(r.length>0) setSaved(true);
     const att=a[0]||null; const remRow=rem[0]||null;
     setAttendance(att?{days_present:att.days_present,total_days:att.total_days,id:att.id}:{days_present:"",total_days:""});
     setCurrentAttendance(att);
@@ -1842,7 +1843,7 @@ function TeacherDash({ user, onLogout }) {
         read:false
       });
     }catch(e){}
-    setSaving(false);setSaved(true);setTimeout(()=>setSaved(false),3000);
+    setSaving(false);setSaved(true);
   };
 
   const generateAndSend=async()=>{
@@ -1917,7 +1918,8 @@ function TeacherDash({ user, onLogout }) {
           </div>
           {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
           <div style={{display:"flex",gap:10,flexDirection:"column"}}>
-            <button onClick={saveResults} disabled={saving} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{saving?"Saving…":"💾 Save Results"}</button>
+            <button onClick={saveResults} disabled={saving||saved} style={{...S.btn(saved?"#94a3b8":"#10b981"),width:"100%",padding:"13px",fontSize:15,opacity:saved?0.7:1}}>{saving?"Saving…":saved?"✅ Results Saved":"💾 Save Results"}</button>
+            {saved&&<button onClick={()=>setSaved(false)} style={{...S.btn("#f59e0b"),width:"100%",padding:"10px",fontSize:13,marginTop:8}}>✏️ Edit Results</button>}
             {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Uploading & Sharing…":"📤 Generate PDF & Share via WhatsApp"}</button>}
             {saved&&!selectedStudent.guardian_phone&&<div style={{background:"#fff7ed",border:"1.5px solid #f59e0b",borderRadius:10,padding:"10px 16px",color:"#92400e",fontSize:13,textAlign:"center"}}>⚠️ No WhatsApp number for this student's guardian</div>}
             {currentRemarks?.report_url&&(
