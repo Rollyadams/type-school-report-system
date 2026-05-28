@@ -2035,6 +2035,7 @@ function Register({ onRegistered }) {
 
 // ── App Root ───────────────────────────────────────────────────
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
+const LAST_ACTIVE_KEY = "last_active_ts";
 
 export default function App() {
   const [user,setUser]=useState(()=>{
@@ -2043,39 +2044,54 @@ export default function App() {
   });
   const [screen,setScreen]=useState("login");
   const [showTimeoutWarning,setShowTimeoutWarning]=useState(false);
-  const timeoutRef=useRef(null);
-  const warningRef=useRef(null);
-  const logoutRef=useRef(null); // stable ref to logout so resetTimer never re-creates
+  const timerRef=useRef(null);
+  const warnRef=useRef(null);
 
   const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); };
+  const handleRegistered=(u)=>{ if(u){ setUser(u); } else { setScreen("login"); } };
+
   const handleLogout=useCallback(()=>{
-    localStorage.removeItem("school_user"); setUser(null); setScreen("login"); setShowTimeoutWarning(false);
-    clearTimeout(timeoutRef.current); clearTimeout(warningRef.current);
+    localStorage.removeItem("school_user");
+    localStorage.removeItem(LAST_ACTIVE_KEY);
+    setUser(null); setScreen("login"); setShowTimeoutWarning(false);
+    clearTimeout(timerRef.current); clearTimeout(warnRef.current);
   },[]);
 
-  // Keep logoutRef in sync without triggering re-renders
-  useEffect(()=>{ logoutRef.current=handleLogout; },[handleLogout]);
+  const checkInactivity=useCallback(()=>{
+    const last=parseInt(localStorage.getItem(LAST_ACTIVE_KEY)||"0");
+    if(!last){ handleLogout(); return; }
+    const elapsed=Date.now()-last;
+    if(elapsed>=INACTIVITY_TIMEOUT_MS){ handleLogout(); return; }
+    if(elapsed>=INACTIVITY_TIMEOUT_MS-60000) setShowTimeoutWarning(true);
+    else setShowTimeoutWarning(false);
+  },[handleLogout]);
 
   const resetTimer=useCallback(()=>{
-    clearTimeout(timeoutRef.current); clearTimeout(warningRef.current);
+    localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     setShowTimeoutWarning(false);
-    warningRef.current=setTimeout(()=>setShowTimeoutWarning(true), INACTIVITY_TIMEOUT_MS-60000);
-    timeoutRef.current=setTimeout(()=>logoutRef.current?.(), INACTIVITY_TIMEOUT_MS);
-  },[]); // empty deps — stable forever
+    clearTimeout(timerRef.current); clearTimeout(warnRef.current);
+    warnRef.current=setTimeout(()=>setShowTimeoutWarning(true), INACTIVITY_TIMEOUT_MS-60000);
+    timerRef.current=setTimeout(()=>handleLogout(), INACTIVITY_TIMEOUT_MS);
+  },[handleLogout]);
 
   useEffect(()=>{
-    if(!user){ clearTimeout(timeoutRef.current); clearTimeout(warningRef.current); return; }
-    const events=["mousedown","mousemove","keydown","keypress","touchstart","touchmove","scroll","click","wheel","visibilitychange"];
-    const handler=()=>resetTimer();
-    events.forEach(e=>document.addEventListener(e,handler,{passive:true}));
-    resetTimer(); // start timer on login
+    if(!user){ clearTimeout(timerRef.current); clearTimeout(warnRef.current); return; }
+    // Immediately check — catches waking from sleep after long background
+    checkInactivity();
+    const events=["mousedown","mousemove","keydown","touchstart","touchmove","scroll","click"];
+    events.forEach(e=>document.addEventListener(e,resetTimer,{passive:true}));
+    // visibilitychange = phone wakes up or user switches back to tab
+    const onVisible=()=>{ if(document.visibilityState==="visible") checkInactivity(); };
+    document.addEventListener("visibilitychange",onVisible);
+    window.addEventListener("focus",checkInactivity);
+    resetTimer();
     return()=>{
-      events.forEach(e=>document.removeEventListener(e,handler));
-      clearTimeout(timeoutRef.current); clearTimeout(warningRef.current);
+      events.forEach(e=>document.removeEventListener(e,resetTimer));
+      document.removeEventListener("visibilitychange",onVisible);
+      window.removeEventListener("focus",checkInactivity);
+      clearTimeout(timerRef.current); clearTimeout(warnRef.current);
     };
-  },[user]); // only re-run when user logs in/out
-
-  const handleRegistered=(u)=>{ if(u){ setUser(u); } else { setScreen("login"); } };
+  },[user]);
 
   if(user) return(
     <>
