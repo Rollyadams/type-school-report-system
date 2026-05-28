@@ -194,6 +194,38 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   doc.text(`${schoolName} • Official Academic Report Card • ${term?.name||""}`,W/2,291,{align:"center"});
 
   doc.save(`${student.full_name.replace(/ /g,"_")}_Report_Card.pdf`);
+  return doc.output("blob");
+};
+
+// ── Upload PDF to Supabase Storage + save URL to remarks ───────
+const uploadAndSaveReport = async (blob, student, term, remarkId, schoolId) => {
+  const fileName = `${schoolId}/${student.id}_${term.id}_report.pdf`;
+  const { data, error } = await supabase.storage
+    .from("report-cards")
+    .upload(fileName, blob, { contentType:"application/pdf", upsert:true });
+  if (error) throw new Error("Upload failed: " + error.message);
+  const { data: urlData } = supabase.storage.from("report-cards").getPublicUrl(fileName);
+  const report_url = urlData.publicUrl;
+  if (remarkId) await db.patch("remarks", remarkId, { report_url });
+  else await db.post("remarks", { student_id:student.id, term_id:term.id, report_url, school_id:schoolId });
+  return report_url;
+};
+
+// ── Share PDF via native share sheet ──────────────────────────
+const sharePDFFile = async (blob, student, term, guardianName) => {
+  const fileName = `${student.full_name.replace(/ /g,"_")}_${term?.name||"Report"}.pdf`;
+  const file = new File([blob], fileName, { type:"application/pdf" });
+  const msg = `Dear ${guardianName||"Parent"}, please find attached the report card for ${student.full_name} — ${term?.name||""}.`;
+  if (navigator.share && navigator.canShare({ files:[file] })) {
+    await navigator.share({ files:[file], text:msg });
+  } else {
+    // Fallback: download + open WhatsApp text
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download=fileName; a.click();
+    URL.revokeObjectURL(url);
+    const phone = student.guardian_phone?.replace(/\D/g,"");
+    if (phone) window.open(`https://wa.me/234${phone.slice(-10)}?text=${encodeURIComponent(msg)}`, "_blank");
+  }
 };
 
 // ── Rate Limiter (Supabase-backed — works across all devices) ─
@@ -1648,6 +1680,53 @@ function PrincipalDash({ user, onLogout }) {
   );
 }
 
+// ── Previous Results Button ────────────────────────────────────
+function PreviousResultsButton({ studentId, terms, currentTermId, classes, school }) {
+  const [open,setOpen]=useState(false);
+  const [prevRemarks,setPrevRemarks]=useState([]);
+  const [loading,setLoading]=useState(false);
+
+  const load=async()=>{
+    setLoading(true);
+    const all=await db.get("remarks",{student_id:studentId});
+    setPrevRemarks(all.filter(r=>r.term_id!==currentTermId&&r.report_url));
+    setLoading(false);setOpen(true);
+  };
+
+  const shareOld=async(r)=>{
+    const term=terms.find(t=>t.id===r.term_id);
+    const res=await fetch(r.report_url);
+    const blob=await res.blob();
+    const file=new File([blob],`Report_${term?.name||"Previous"}.pdf`,{type:"application/pdf"});
+    if(navigator.share&&navigator.canShare({files:[file]})) await navigator.share({files:[file]});
+    else { const a=document.createElement("a");a.href=r.report_url;a.download=file.name;a.click(); }
+  };
+
+  if(!open) return <button onClick={load} style={{...S.btn("#94a3b8"),flex:1,fontSize:12}}>{loading?"Loading…":"📂 Previous Results"}</button>;
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:9999,display:"flex",alignItems:"flex-end"}} onClick={()=>setOpen(false)}>
+      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxHeight:"70vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontWeight:800,fontSize:16,color:"#1e293b",marginBottom:16}}>📂 Previous Results</div>
+        {prevRemarks.length===0&&<div style={{textAlign:"center",color:"#94a3b8",padding:20}}>No previous reports found.</div>}
+        {prevRemarks.map(r=>{
+          const term=terms.find(t=>t.id===r.term_id);
+          return(
+            <div key={r.id} style={{...S.card,padding:"12px 16px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:14}}>{term?.name||"Unknown Term"}</div>
+                <div style={{fontSize:11,color:"#64748b"}}>{r.promotion_status||"—"}</div>
+              </div>
+              <button onClick={()=>shareOld(r)} style={S.btn("#25d366")}>📤 Share</button>
+            </div>
+          );
+        })}
+        <button onClick={()=>setOpen(false)} style={{...S.btn("#64748b"),width:"100%",marginTop:8}}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Stable score row — uncontrolled inputs, saves only on blur ──
 const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate }) {
   const total=(Number(ca)||0)+(Number(exam)||0);
@@ -1774,17 +1853,14 @@ function TeacherDash({ user, onLogout }) {
       const term=terms.find(t=>t.id===selectedTerm);
       const subs=cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[];
       const allClassResults=await db.get("results",{term_id:selectedTerm,student_id:allStudentsInClass.map(s=>s.id)});
-      // Step 1: Download PDF to device
-      await generateReportPDF(selectedStudent,cls,term,subs,currentResults,currentAttendance,currentRemarks,allStudentsInClass,allClassResults,school,logoDataUrl);
-      // Step 2: Wait for download, then show instruction + open WhatsApp
-      setTimeout(()=>{
-        const phone=selectedStudent.guardian_phone?.replace(/\D/g,"");
-        const msg=`Dear ${selectedStudent.guardian_name||"Parent"}, please find attached the report card for ${selectedStudent.full_name} — ${term?.name||""} — ${school?.name||""}. Please print and sign.`;
-        alert(`✅ PDF downloaded!\n\nNow:\n1. Tap OK to open WhatsApp\n2. Tap the 📎 attach button\n3. Select the downloaded PDF from your Files\n4. Send it with the pre-filled message`);
-        window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(msg)}`,"_blank");
-        setGenerating(false);
-      },1500);
-    }catch(e){alert("Error: "+e.message);setGenerating(false);}
+      // 1. Generate PDF blob
+      const blob=await generateReportPDF(selectedStudent,cls,term,subs,currentResults,currentAttendance,currentRemarks,allStudentsInClass,allClassResults,school,logoDataUrl);
+      // 2. Upload to Supabase Storage + save URL
+      await uploadAndSaveReport(blob,selectedStudent,term,currentRemarks?.id,user.school_id);
+      // 3. Share via native share sheet
+      await sharePDFFile(blob,selectedStudent,term,selectedStudent.guardian_name);
+    }catch(e){alert("Error: "+e.message);}
+    setGenerating(false);
   };
 
   const tabs=[
@@ -1842,8 +1918,14 @@ function TeacherDash({ user, onLogout }) {
           {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
           <div style={{display:"flex",gap:10,flexDirection:"column"}}>
             <button onClick={saveResults} disabled={saving} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{saving?"Saving…":"💾 Save Results"}</button>
-            {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Generating PDF…":"📥 Download PDF → Send via WhatsApp"}</button>}
+            {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Uploading & Sharing…":"📤 Generate PDF & Share via WhatsApp"}</button>}
             {saved&&!selectedStudent.guardian_phone&&<div style={{background:"#fff7ed",border:"1.5px solid #f59e0b",borderRadius:10,padding:"10px 16px",color:"#92400e",fontSize:13,textAlign:"center"}}>⚠️ No WhatsApp number for this student's guardian</div>}
+            {currentRemarks?.report_url&&(
+              <div style={{marginTop:10,display:"flex",gap:8}}>
+                <button onClick={()=>window.open(currentRemarks.report_url,"_blank")} style={{...S.btn("#6366f1"),flex:1,fontSize:12}}>📄 View Current PDF</button>
+                <PreviousResultsButton studentId={selectedStudent.id} terms={terms} currentTermId={selectedTerm} classes={classes} school={school}/>
+              </div>
+            )}
           </div>
         </div>
       )}
