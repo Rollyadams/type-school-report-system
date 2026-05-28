@@ -1774,10 +1774,13 @@ function TeacherDash({ user, onLogout }) {
       const term=terms.find(t=>t.id===selectedTerm);
       const subs=cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[];
       const allClassResults=await db.get("results",{term_id:selectedTerm,student_id:allStudentsInClass.map(s=>s.id)});
+      // Step 1: Download PDF to device
       await generateReportPDF(selectedStudent,cls,term,subs,currentResults,currentAttendance,currentRemarks,allStudentsInClass,allClassResults,school,logoDataUrl);
+      // Step 2: Wait for download, then show instruction + open WhatsApp
       setTimeout(()=>{
         const phone=selectedStudent.guardian_phone?.replace(/\D/g,"");
         const msg=`Dear ${selectedStudent.guardian_name||"Parent"}, please find attached the report card for ${selectedStudent.full_name} — ${term?.name||""} — ${school?.name||""}. Please print and sign.`;
+        alert(`✅ PDF downloaded!\n\nNow:\n1. Tap OK to open WhatsApp\n2. Tap the 📎 attach button\n3. Select the downloaded PDF from your Files\n4. Send it with the pre-filled message`);
         window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(msg)}`,"_blank");
         setGenerating(false);
       },1500);
@@ -1839,7 +1842,7 @@ function TeacherDash({ user, onLogout }) {
           {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
           <div style={{display:"flex",gap:10,flexDirection:"column"}}>
             <button onClick={saveResults} disabled={saving} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{saving?"Saving…":"💾 Save Results"}</button>
-            {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Generating PDF…":"📥 Generate PDF & Send to Parent"}</button>}
+            {saved&&selectedStudent.guardian_phone&&<button onClick={generateAndSend} disabled={generating} style={{...S.btn("#25d366"),width:"100%",padding:"13px",fontSize:15}}>{generating?"⏳ Generating PDF…":"📥 Download PDF → Send via WhatsApp"}</button>}
             {saved&&!selectedStudent.guardian_phone&&<div style={{background:"#fff7ed",border:"1.5px solid #f59e0b",borderRadius:10,padding:"10px 16px",color:"#92400e",fontSize:13,textAlign:"center"}}>⚠️ No WhatsApp number for this student's guardian</div>}
           </div>
         </div>
