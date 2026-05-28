@@ -1128,20 +1128,20 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
             ))}
           </div>
           <div style={{padding:"12px 16px",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-            <table style={{width:"100%",minWidth:420,borderCollapse:"collapse",fontFamily:"sans-serif",fontSize:12}}>
+            <table style={{width:"100%",minWidth:360,borderCollapse:"collapse",fontFamily:"sans-serif",fontSize:11}}>
               <thead><tr style={{background:"linear-gradient(135deg,#1e3a8a,#4338ca)"}}>
-                {["Subject","C.A","Exam","Total","Grade","Remark"].map(h=><th key={h} style={{padding:"8px 5px",color:"#fff",textAlign:"center",fontWeight:700,fontSize:10,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}
+                {["Subject","C.A","Exam","Total","Grd","Rmk"].map((h,i)=><th key={h} style={{padding:"7px 4px",color:"#fff",textAlign:i===0?"left":"center",fontWeight:700,fontSize:9,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {sResults.map((r,i)=>{
                   const g=getGrade(r.total);
                   return(<tr key={r.subject} style={{background:i%2===0?"#fff":"#f8faff"}}>
-                    <td style={{padding:"8px 5px",fontWeight:700,color:"#1e293b",fontSize:11}}>{r.subject}</td>
-                    <td style={{padding:"8px 5px",textAlign:"center",color:"#475569"}}>{r.ca}</td>
-                    <td style={{padding:"8px 5px",textAlign:"center",color:"#475569"}}>{r.exam}</td>
-                    <td style={{padding:"8px 5px",textAlign:"center",fontWeight:800,color:g.col,fontSize:14}}>{r.total}</td>
-                    <td style={{padding:"8px 5px",textAlign:"center"}}><span style={S.badge(g.col)}>{g.g}</span></td>
-                    <td style={{padding:"8px 5px",textAlign:"center",color:g.col,fontWeight:600,fontSize:11,whiteSpace:"nowrap"}}>{g.r}</td>
+                    <td style={{padding:"7px 4px",fontWeight:700,color:"#1e293b",fontSize:11}}>{r.subject}</td>
+                    <td style={{padding:"7px 4px",textAlign:"center",color:"#475569",fontSize:11}}>{r.ca}</td>
+                    <td style={{padding:"7px 4px",textAlign:"center",color:"#475569",fontSize:11}}>{r.exam}</td>
+                    <td style={{padding:"7px 4px",textAlign:"center",fontWeight:800,color:g.col,fontSize:12}}>{r.total}</td>
+                    <td style={{padding:"7px 4px",textAlign:"center"}}><span style={{...S.badge(g.col),fontSize:9,padding:"2px 5px"}}>{g.g}</span></td>
+                    <td style={{padding:"7px 4px",textAlign:"center",color:g.col,fontWeight:600,fontSize:9,whiteSpace:"nowrap"}}>{g.r}</td>
                   </tr>);
                 })}
               </tbody>
