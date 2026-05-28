@@ -1648,6 +1648,20 @@ function PrincipalDash({ user, onLogout }) {
   );
 }
 
+// ── Stable score row — outside TeacherDash to prevent remount on keystroke ──
+function ScoreRow({ sub, ca, exam, onCaChange, onExamChange }) {
+  const total=(Number(ca)||0)+(Number(exam)||0);
+  const g=getGrade(total);
+  return(
+    <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
+      <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
+      <input type="number" min="0" max="40" value={ca} onChange={e=>onCaChange(e.target.value)} placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
+      <input type="number" min="0" max="60" value={exam} onChange={e=>onExamChange(e.target.value)} placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
+      <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
+    </div>
+  );
+}
+
 // ── Teacher Dashboard ──────────────────────────────────────────
 function TeacherDash({ user, onLogout }) {
   const [tab,setTab]=useState("results");
@@ -1802,15 +1816,11 @@ function TeacherDash({ user, onLogout }) {
           </div>
           {subjects.map(sub=>{
             const sc=scores[sub]||{ca:"",exam:""};
-            const total=(Number(sc.ca)||0)+(Number(sc.exam)||0);
-            const g=getGrade(total);
             return(
-              <div key={sub} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
-                <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
-                <input type="number" min="0" max="40" value={sc.ca} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],ca:e.target.value}}))} placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
-                <input type="number" min="0" max="60" value={sc.exam} onChange={e=>setScores(p=>({...p,[sub]:{...p[sub],exam:e.target.value}}))} placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
-                <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
-              </div>
+              <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam}
+                onCaChange={v=>setScores(p=>({...p,[sub]:{...p[sub],ca:v}}))}
+                onExamChange={v=>setScores(p=>({...p,[sub]:{...p[sub],exam:v}}))}
+              />
             );
           })}
           <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
