@@ -1119,27 +1119,27 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               </div>
             ))}
           </div>
-          <div style={{padding:"20px 32px"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"sans-serif",fontSize:13}}>
+          <div style={{padding:"12px 16px",overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+            <table style={{width:"100%",minWidth:420,borderCollapse:"collapse",fontFamily:"sans-serif",fontSize:12}}>
               <thead><tr style={{background:"linear-gradient(135deg,#1e3a8a,#4338ca)"}}>
-                {["Subject","C.A (40%)","Exam (60%)","Total","Grade","Remark"].map(h=><th key={h} style={{padding:"10px 8px",color:"#fff",textAlign:"center",fontWeight:700,fontSize:11,textTransform:"uppercase"}}>{h}</th>)}
+                {["Subject","C.A","Exam","Total","Grade","Remark"].map(h=><th key={h} style={{padding:"8px 5px",color:"#fff",textAlign:"center",fontWeight:700,fontSize:10,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {sResults.map((r,i)=>{
                   const g=getGrade(r.total);
                   return(<tr key={r.subject} style={{background:i%2===0?"#fff":"#f8faff"}}>
-                    <td style={{padding:"9px 8px",fontWeight:700,color:"#1e293b"}}>{r.subject}</td>
-                    <td style={{padding:"9px 8px",textAlign:"center",color:"#475569"}}>{r.ca}</td>
-                    <td style={{padding:"9px 8px",textAlign:"center",color:"#475569"}}>{r.exam}</td>
-                    <td style={{padding:"9px 8px",textAlign:"center",fontWeight:800,color:g.col,fontSize:15}}>{r.total}</td>
-                    <td style={{padding:"9px 8px",textAlign:"center"}}><span style={S.badge(g.col)}>{g.g}</span></td>
-                    <td style={{padding:"9px 8px",textAlign:"center",color:g.col,fontWeight:600,fontSize:12}}>{g.r}</td>
+                    <td style={{padding:"8px 5px",fontWeight:700,color:"#1e293b",fontSize:11}}>{r.subject}</td>
+                    <td style={{padding:"8px 5px",textAlign:"center",color:"#475569"}}>{r.ca}</td>
+                    <td style={{padding:"8px 5px",textAlign:"center",color:"#475569"}}>{r.exam}</td>
+                    <td style={{padding:"8px 5px",textAlign:"center",fontWeight:800,color:g.col,fontSize:14}}>{r.total}</td>
+                    <td style={{padding:"8px 5px",textAlign:"center"}}><span style={S.badge(g.col)}>{g.g}</span></td>
+                    <td style={{padding:"8px 5px",textAlign:"center",color:g.col,fontWeight:600,fontSize:11,whiteSpace:"nowrap"}}>{g.r}</td>
                   </tr>);
                 })}
               </tbody>
             </table>
           </div>
-          <div style={{padding:"0 32px 20px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr 1fr",gap:10}}>
+          <div style={{padding:"0 16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
             {[["Total",totalMarks,"#6366f1"],["Average",`${avg}%`,"#0ea5e9"],["Position",pos?`${ordinal(pos)} of ${classStudents.length}`:"—","#f59e0b"],["Attendance",att?`${att.days_present}/${att.total_days||"—"}`:"—","#10b981"],["Overall",overall.g,overall.col],["Status",promotionStatus||"—",promotionStatus==="Promoted"?"#10b981":promotionStatus==="Repeated"?"#ef4444":"#94a3b8"]].map(([l,v,col])=>(
               <div key={l} style={{background:`${col}10`,border:`1.5px solid ${col}30`,borderRadius:10,padding:12,textAlign:"center"}}>
                 <div style={{fontSize:10,fontWeight:700,color:col,textTransform:"uppercase",letterSpacing:"0.08em",fontFamily:"sans-serif"}}>{l}</div>
@@ -1148,13 +1148,13 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
             ))}
           </div>
           {(rem?.teacher_remark||rem?.principal_remark)&&(
-            <div style={{margin:"0 32px 20px",fontFamily:"sans-serif"}}>
+            <div style={{margin:"0 16px 20px",fontFamily:"sans-serif"}}>
               {rem?.teacher_remark&&<div style={{background:"#f0fdf4",borderRadius:10,padding:"12px 16px",borderLeft:"4px solid #10b981",marginBottom:10}}><div style={{fontSize:11,fontWeight:800,color:"#10b981",textTransform:"uppercase",marginBottom:4}}>🧑‍🏫 Class Teacher</div><p style={{margin:0,color:"#374151",fontSize:13}}>{rem.teacher_remark}</p></div>}
               {rem?.principal_remark&&<div style={{background:"#eff6ff",borderRadius:10,padding:"12px 16px",borderLeft:"4px solid #3b82f6"}}><div style={{fontSize:11,fontWeight:800,color:"#3b82f6",textTransform:"uppercase",marginBottom:4}}>🏛 Principal</div><p style={{margin:0,color:"#374151",fontSize:13}}>{rem.principal_remark}</p></div>}
             </div>
           )}
           {term?.resumption_date&&(
-            <div style={{margin:"0 32px 20px",background:"#fff7ed",borderRadius:10,padding:"12px 16px",borderLeft:"4px solid #f59e0b",fontFamily:"sans-serif"}}>
+            <div style={{margin:"0 16px 20px",background:"#fff7ed",borderRadius:10,padding:"12px 16px",borderLeft:"4px solid #f59e0b",fontFamily:"sans-serif"}}>
               <div style={{fontSize:11,fontWeight:800,color:"#f59e0b",textTransform:"uppercase",marginBottom:4}}>📅 Next Term Resumption</div>
               <p style={{margin:0,color:"#92400e",fontSize:14,fontWeight:700}}>{term.resumption_date}</p>
             </div>
