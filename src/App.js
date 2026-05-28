@@ -452,7 +452,32 @@ function ParentResultView({ data, onBack }) {
 }
 
 // ── School Settings ────────────────────────────────────────────
-function SchoolSettings({ school, reload }) {
+function SchoolSettings({ school, sessions, terms, students, classes, reload, schoolId }) {
+  const [subTab,setSubTab]=useState("info");
+  const subtabs=[
+    {id:"info",    label:"School Info",      icon:"🏫"},
+    {id:"sessions",label:"Sessions & Terms", icon:"📅"},
+    {id:"promote", label:"Promote Students", icon:"🎖️"},
+  ];
+  return(
+    <div>
+      <div style={S.section("#8b5cf6")}><span>⚙️</span><span style={{fontWeight:800,color:"#8b5cf6"}}>Settings</span></div>
+      {/* Sub-tab bar */}
+      <div style={{display:"flex",gap:8,marginBottom:20,overflowX:"auto",paddingBottom:4}}>
+        {subtabs.map(t=>(
+          <button key={t.id} onClick={()=>setSubTab(t.id)} style={{...S.btn(subTab===t.id?"#8b5cf6":"#e2e8f0"),color:subTab===t.id?"#fff":"#475569",fontWeight:700,fontSize:12,padding:"8px 14px",whiteSpace:"nowrap",flexShrink:0}}>
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+      {subTab==="info"    &&<SchoolInfoForm school={school} reload={reload}/>}
+      {subTab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={reload} schoolId={schoolId}/>}
+      {subTab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={reload}/>}
+    </div>
+  );
+}
+
+function SchoolInfoForm({ school, reload }) {
   const [form,setForm]=useState({name:school?.name||"",address:school?.address||"",phone:school?.phone||"",email:school?.email||"",logo_url:school?.logo_url||""});
   const [saving,setSaving]=useState(false); const [saved,setSaved]=useState(false); const [uploading,setUploading]=useState(false);
 
@@ -481,7 +506,6 @@ function SchoolSettings({ school, reload }) {
 
   return(
     <div>
-      <div style={S.section("#8b5cf6")}><span>⚙️</span><span style={{fontWeight:800,color:"#8b5cf6"}}>School Settings</span></div>
       <div style={S.card}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <div style={{gridColumn:"1/-1"}}><label style={S.label}>School Name</label><input style={S.input} value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="e.g. School Data Center"/></div>
@@ -1658,11 +1682,9 @@ function PrincipalDash({ user, onLogout }) {
     {id:"students", label:"Students",  icon:"👨‍🎓", desc:"Add & manage students"},
     {id:"classes",  label:"Classes",   icon:"🏫", desc:"Manage class arms"},
     {id:"teachers", label:"Teachers",  icon:"👩‍🏫", desc:"Staff & class assignment"},
-    {id:"sessions", label:"Sessions",  icon:"📅", desc:"Academic sessions & terms"},
     {id:"results",  label:"Results",   icon:"📋", desc:"View & generate report cards"},
-    {id:"promote",  label:"Promote",   icon:"🎖️", desc:"Promote or retain students"},
-    {id:"settings", label:"Settings",  icon:"⚙️", desc:"School name, logo & info"},
     {id:"messages", label:"Messages",  icon:"📨", desc:"WhatsApp parent messages"},
+    {id:"settings", label:"Settings",  icon:"⚙️", desc:"School config & admin"},
   ];
 
   return (
@@ -1671,11 +1693,9 @@ function PrincipalDash({ user, onLogout }) {
       {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={user.school_id} school={school}/>}
       {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
-      {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={user.school_id}/>}
       {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
-      {tab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={loadAll}/>}
-      {tab==="settings"&&<SchoolSettings school={school} reload={loadAll}/>}
       {tab==="messages"&&<Messages students={students} classes={classes} school={school}/>}
+      {tab==="settings"&&<SchoolSettings school={school} sessions={sessions} terms={terms} students={students} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
     </SidebarLayout>
   );
 }
