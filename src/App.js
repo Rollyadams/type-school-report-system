@@ -375,21 +375,25 @@ function ParentResultView({ data, onBack }) {
           ))}
         </div>
         <div style={S.card}>
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-            {["Subject","CA","Exam","Total","Grade"].map(h=><div key={h} style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>{h}</div>)}
-          </div>
-          {sResults.map((r,i)=>{
-            const g=getGrade(r.total);
-            return(
-              <div key={r.sub} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:8,padding:"9px 0",borderBottom:i<sResults.length-1?"1px solid #f1f5f9":"none",alignItems:"center"}}>
-                <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{r.sub}</div>
-                <div style={{textAlign:"center",fontSize:12,color:"#64748b"}}>{r.ca}</div>
-                <div style={{textAlign:"center",fontSize:12,color:"#64748b"}}>{r.exam}</div>
-                <div style={{textAlign:"center",fontWeight:800,color:g.col}}>{r.total}</div>
-                <div style={{textAlign:"center"}}><span style={S.badge(g.col)}>{g.g}</span></div>
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+            <div style={{minWidth:340}}>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                {["Subject","CA","Exam","Total","Grade"].map(h=><div key={h} style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>{h}</div>)}
               </div>
-            );
-          })}
+              {sResults.map((r,i)=>{
+                const g=getGrade(r.total);
+                return(
+                  <div key={r.sub} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:6,padding:"8px 0",borderBottom:i<sResults.length-1?"1px solid #f1f5f9":"none",alignItems:"center"}}>
+                    <div style={{fontWeight:600,fontSize:12,color:"#1e293b"}}>{r.sub}</div>
+                    <div style={{textAlign:"center",fontSize:12,color:"#64748b"}}>{r.ca}</div>
+                    <div style={{textAlign:"center",fontSize:12,color:"#64748b"}}>{r.exam}</div>
+                    <div style={{textAlign:"center",fontWeight:800,color:g.col}}>{r.total}</div>
+                    <div style={{textAlign:"center"}}><span style={S.badge(g.col)}>{g.g}</span></div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
         {(remarks?.teacher_remark||remarks?.principal_remark)&&(
           <div style={S.card}>
@@ -1111,11 +1115,11 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               <div style={{color:"#c7d2fe",fontSize:13,marginTop:8}}>{term?.name} • {cls?.name} {cls?.arm||""}</div>
             </div>
           </div>
-          <div style={{padding:"20px 32px",background:"#f8faff",borderBottom:"2px solid #e0e7ff",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
+          <div style={{padding:"16px",background:"#f8faff",borderBottom:"2px solid #e0e7ff",display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             {[["Student Name",reportStudent.full_name],["Admission No",reportStudent.admission_number||"—"],["Class",`${cls?.name||""} ${cls?.arm||""}`],["Gender",reportStudent.gender||"—"],["Date of Birth",reportStudent.date_of_birth||"—"],["Parent/Guardian",reportStudent.guardian_name||"—"]].map(([l,v])=>(
-              <div key={l} style={{borderLeft:"3px solid #6366f1",paddingLeft:10}}>
-                <div style={{fontSize:10,fontWeight:700,color:"#6366f1",textTransform:"uppercase",letterSpacing:"0.1em",fontFamily:"sans-serif"}}>{l}</div>
-                <div style={{fontSize:14,fontWeight:700,color:"#1e293b",marginTop:2,fontFamily:"sans-serif"}}>{v}</div>
+              <div key={l} style={{borderLeft:"3px solid #6366f1",paddingLeft:8,minWidth:0}}>
+                <div style={{fontSize:9,fontWeight:700,color:"#6366f1",textTransform:"uppercase",letterSpacing:"0.08em",fontFamily:"sans-serif"}}>{l}</div>
+                <div style={{fontSize:12,fontWeight:700,color:"#1e293b",marginTop:2,fontFamily:"sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v}</div>
               </div>
             ))}
           </div>
@@ -1159,12 +1163,12 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               <p style={{margin:0,color:"#92400e",fontSize:14,fontWeight:700}}>{term.resumption_date}</p>
             </div>
           )}
-          <div style={{margin:"0 32px 28px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16,fontFamily:"sans-serif"}}>
+          <div style={{margin:"0 16px 24px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,fontFamily:"sans-serif"}}>
             {["Class Teacher","Principal","Parent/Guardian"].map(sig=>(
-              <div key={sig} style={{textAlign:"center"}}><div style={{borderTop:"2px solid #cbd5e1",paddingTop:8}}><div style={{fontSize:12,color:"#94a3b8",fontWeight:600}}>{sig}</div><div style={{fontSize:11,color:"#cbd5e1"}}>Signature & Date</div></div></div>
+              <div key={sig} style={{textAlign:"center"}}><div style={{borderTop:"2px solid #cbd5e1",paddingTop:8}}><div style={{fontSize:10,color:"#94a3b8",fontWeight:600}}>{sig}</div><div style={{fontSize:10,color:"#cbd5e1"}}>Signature & Date</div></div></div>
             ))}
           </div>
-          <div style={{background:"linear-gradient(135deg,#1e3a8a,#3730a3)",padding:"12px 32px",textAlign:"center",fontFamily:"sans-serif"}}>
+          <div style={{background:"linear-gradient(135deg,#1e3a8a,#3730a3)",padding:"12px 16px",textAlign:"center",fontFamily:"sans-serif"}}>
             <p style={{margin:0,color:"#c7d2fe",fontSize:11}}>{school?.name||"School"} • Official Academic Report Card • {term?.name}</p>
           </div>
         </div>
