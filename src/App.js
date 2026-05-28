@@ -867,13 +867,16 @@ function ManageClasses({ classes, reload, schoolId, students, terms }) {
 
 // ── Manage Teachers (with class assignment) ────────────────────
 function ManageTeachers({ teachers, classes, reload, schoolId }) {
-  const [adding,setAdding]=useState(false); const [form,setForm]=useState({full_name:"",email:"",class_id:""});
+  const [adding,setAdding]=useState(false); const [form,setForm]=useState({full_name:"",email:"",class_id:"",password:"",confirm:""});
   const [saving,setSaving]=useState(false);
   const save=async()=>{
     if(!form.full_name.trim()||!form.email.trim()){alert("Name and email required");return;}
+    if(!form.password.trim()){alert("Password is required");return;}
+    if(form.password!==form.confirm){alert("Passwords do not match");return;}
+    if(form.password.length<6){alert("Password must be at least 6 characters");return;}
     setSaving(true);
-    await db.post("users",{full_name:form.full_name,email:form.email,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
-    setForm({full_name:"",email:"",class_id:""});setAdding(false);setSaving(false);reload();
+    await db.post("users",{full_name:form.full_name,email:form.email,password:form.password,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
+    setForm({full_name:"",email:"",class_id:"",password:"",confirm:""});setAdding(false);setSaving(false);reload();
   };
   const updateClass=async(tid,cid)=>{ await db.patch("users",tid,{class_id:cid||null}); reload(); };
   return(
@@ -887,6 +890,8 @@ function ManageTeachers({ teachers, classes, reload, schoolId }) {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <div><label style={S.label}>Full Name</label><input style={S.input} value={form.full_name} onChange={e=>setForm(p=>({...p,full_name:e.target.value}))} placeholder="Teacher's name"/></div>
             <div><label style={S.label}>Email</label><input style={S.input} type="email" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="teacher@school.com"/></div>
+            <div><label style={S.label}>Password</label><input style={S.input} type="password" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))} placeholder="Min. 6 characters"/></div>
+            <div><label style={S.label}>Confirm Password</label><input style={S.input} type="password" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} placeholder="Repeat password"/></div>
             <div style={{gridColumn:"1/-1"}}><label style={S.label}>Assign Class</label>
               <select style={S.input} value={form.class_id} onChange={e=>setForm(p=>({...p,class_id:e.target.value}))}>
                 <option value="">No class assigned</option>
@@ -894,8 +899,7 @@ function ManageTeachers({ teachers, classes, reload, schoolId }) {
               </select>
             </div>
           </div>
-          <p style={{fontSize:12,color:"#94a3b8",margin:"12px 0 0"}}>Default password: <strong>school1234</strong></p>
-          <button onClick={save} disabled={saving} style={{...S.btn("#10b981"),marginTop:12}}>{saving?"Saving…":"Save Teacher"}</button>
+          <button onClick={save} disabled={saving} style={{...S.btn("#10b981"),marginTop:16}}>{saving?"Saving…":"Save Teacher"}</button>
         </div>
       )}
       {teachers.length===0&&!adding&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No teachers yet.</div>}
