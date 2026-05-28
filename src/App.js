@@ -1648,19 +1648,23 @@ function PrincipalDash({ user, onLogout }) {
   );
 }
 
-// ── Stable score row — outside TeacherDash to prevent remount on keystroke ──
-function ScoreRow({ sub, ca, exam, onCaChange, onExamChange }) {
+// ── Stable score row — uncontrolled inputs, saves only on blur ──
+const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate }) {
   const total=(Number(ca)||0)+(Number(exam)||0);
   const g=getGrade(total);
   return(
     <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
       <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
-      <input type="number" min="0" max="40" value={ca} onChange={e=>onCaChange(e.target.value)} placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
-      <input type="number" min="0" max="60" value={exam} onChange={e=>onExamChange(e.target.value)} placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
+      <input type="number" min="0" max="40" defaultValue={ca}
+        onBlur={e=>onUpdate(sub,"ca",e.target.value)}
+        placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
+      <input type="number" min="0" max="60" defaultValue={exam}
+        onBlur={e=>onUpdate(sub,"exam",e.target.value)}
+        placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
       <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
     </div>
   );
-}
+});
 
 // ── Teacher Dashboard ──────────────────────────────────────────
 function TeacherDash({ user, onLogout }) {
@@ -1671,6 +1675,7 @@ function TeacherDash({ user, onLogout }) {
   const [selectedClass,setSelectedClass]=useState(""); const [selectedTerm,setSelectedTerm]=useState("");
   const [selectedStudent,setSelectedStudent]=useState(null); const [subjects,setSubjects]=useState([]);
   const [scores,setScores]=useState({}); const [attendance,setAttendance]=useState({days_present:"",total_days:""});
+  const updateScore=useCallback((sub,field,val)=>setScores(p=>({...p,[sub]:{...p[sub],[field]:val}})),[]);
   const [remarks,setRemarks]=useState({teacher_remark:""}); const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false); const [generating,setGenerating]=useState(false);
   const [currentResults,setCurrentResults]=useState([]); const [currentAttendance,setCurrentAttendance]=useState(null);
@@ -1816,12 +1821,7 @@ function TeacherDash({ user, onLogout }) {
           </div>
           {subjects.map(sub=>{
             const sc=scores[sub]||{ca:"",exam:""};
-            return(
-              <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam}
-                onCaChange={v=>setScores(p=>({...p,[sub]:{...p[sub],ca:v}}))}
-                onExamChange={v=>setScores(p=>({...p,[sub]:{...p[sub],exam:v}}))}
-              />
-            );
+            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore}/>;
           })}
           <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
