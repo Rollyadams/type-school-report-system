@@ -1507,11 +1507,15 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
 
       {/* ── Top Bar ── */}
       <div style={{ background: grad, padding:"0 16px", height:62, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 4px 24px #00000040" }}>
-        <button onClick={() => setOpen(true)} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5, flexShrink:0 }}>
-          <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
-          <div style={{ width:14, height:2, background:"#ffffffaa", borderRadius:2 }}/>
-          <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
-        </button>
+        {/* Back button — shown on all non-default tabs */}
+        {activeTab !== defaultTab
+          ? <button onClick={()=>{ setActiveTab(defaultTab); window.history.pushState({tab:defaultTab},""); }} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:"#fff", fontSize:18, fontWeight:900 }}>←</button>
+          : <button onClick={() => setOpen(true)} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5, flexShrink:0 }}>
+              <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
+              <div style={{ width:14, height:2, background:"#ffffffaa", borderRadius:2 }}/>
+              <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
+            </button>
+        }
         <div style={{ textAlign:"center", flex:1, padding:"0 10px", minWidth:0 }}>
           <div style={{ color:"#fff", fontWeight:900, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", letterSpacing:"0.01em" }}>{school?.name || "School Data Center"}</div>
           <div style={{ color:"#c7d2fecc", fontSize:10, marginTop:2, letterSpacing:"0.06em", textTransform:"uppercase" }}>{activeTabObj?.icon} {activeTabObj?.label}</div>
