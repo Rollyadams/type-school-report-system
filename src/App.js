@@ -1597,8 +1597,6 @@ function PrincipalDash({ user, onLogout }) {
   useEffect(()=>{loadAll();},[]);
   const loadAll=async()=>{
     setLoading(true);
-    // Re-activate RLS context on every load (lost on page refresh)
-    await activateUserContext(user.id);
     const schoolId=user.school_id;
     const [sc,s,c,t,se,te]=await Promise.all([
       db.get("schools",{id:schoolId}),
@@ -1656,7 +1654,6 @@ function TeacherDash({ user, onLogout }) {
   useEffect(()=>{loadData();},[]);
   const loadData=async()=>{
     setLoading(true);
-    await activateUserContext(user.id);
     const schoolId=user.school_id;
     const [c,t,sc]=await Promise.all([
       db.get("classes",{school_id:schoolId}),
