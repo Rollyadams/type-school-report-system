@@ -933,7 +933,7 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
   const saveTerm=async()=>{
     if(!tForm.name||!tForm.session_id){alert("Please fill all fields");return;}
     if(tForm.is_current) for(const t of terms.filter(t=>t.is_current)) await db.patch("terms",t.id,{is_current:false});
-    await db.post("terms",{...tForm,total_days:Number(tForm.total_days)||62});
+    await db.post("terms",{...tForm,total_days:Number(tForm.total_days)||62,school_id:schoolId});
     setTForm({name:"",session_id:"",total_days:"62",is_current:false,resumption_date:""});setAddTerm(false);reload();
   };
   const setCurrentTerm=async(id)=>{
