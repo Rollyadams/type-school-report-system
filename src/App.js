@@ -1597,9 +1597,11 @@ function PrincipalDash({ user, onLogout }) {
   useEffect(()=>{loadAll();},[]);
   const loadAll=async()=>{
     setLoading(true);
-    const sc=await db.get("schools",{id:user.school_id});
+    // Re-activate RLS context on every load (lost on page refresh)
+    await activateUserContext(user.id);
     const schoolId=user.school_id;
-    const [s,c,t,se,te]=await Promise.all([
+    const [sc,s,c,t,se,te]=await Promise.all([
+      db.get("schools",{id:schoolId}),
       db.get("students",{school_id:schoolId}),
       db.get("classes",{school_id:schoolId}),
       db.get("users",{role:"teacher",school_id:schoolId}),
@@ -1624,10 +1626,10 @@ function PrincipalDash({ user, onLogout }) {
   return (
     <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/>}
-      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={school?.id} school={school}/>}
-      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={school?.id} students={students} terms={terms}/>}
-      {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={school?.id}/>}
-      {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={school?.id}/>}
+      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={user.school_id} school={school}/>}
+      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms}/>}
+      {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
+      {tab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={loadAll} schoolId={user.school_id}/>}
       {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
       {tab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={loadAll}/>}
       {tab==="settings"&&<SchoolSettings school={school} reload={loadAll}/>}
@@ -1654,6 +1656,7 @@ function TeacherDash({ user, onLogout }) {
   useEffect(()=>{loadData();},[]);
   const loadData=async()=>{
     setLoading(true);
+    await activateUserContext(user.id);
     const schoolId=user.school_id;
     const [c,t,sc]=await Promise.all([
       db.get("classes",{school_id:schoolId}),
