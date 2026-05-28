@@ -1675,7 +1675,11 @@ function TeacherDash({ user, onLogout }) {
   const [selectedClass,setSelectedClass]=useState(""); const [selectedTerm,setSelectedTerm]=useState("");
   const [selectedStudent,setSelectedStudent]=useState(null); const [subjects,setSubjects]=useState([]);
   const [scores,setScores]=useState({}); const [attendance,setAttendance]=useState({days_present:"",total_days:""});
-  const updateScore=useCallback((sub,field,val)=>setScores(p=>({...p,[sub]:{...p[sub],[field]:val}})),[]);
+  const updateScore=useCallback((sub,field,val)=>{
+    const max=field==="ca"?40:60;
+    const capped=Math.min(Math.max(Number(val)||0,0),max);
+    setScores(p=>({...p,[sub]:{...p[sub],[field]:capped}}));
+  },[]);
   const [remarks,setRemarks]=useState({teacher_remark:""}); const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false); const [generating,setGenerating]=useState(false);
   const [currentResults,setCurrentResults]=useState([]); const [currentAttendance,setCurrentAttendance]=useState(null);
@@ -1826,11 +1830,11 @@ function TeacherDash({ user, onLogout }) {
           <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-              <div><label style={S.label}>Days Present</label><input type="number" style={S.input} value={attendance.days_present} onChange={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
-              <div><label style={S.label}>Total School Days</label><input type="number" style={S.input} value={attendance.total_days} onChange={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
+              <div><label style={S.label}>Days Present</label><input type="number" style={S.input} defaultValue={attendance.days_present} onBlur={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
+              <div><label style={S.label}>Total School Days</label><input type="number" style={S.input} defaultValue={attendance.total_days} onBlur={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
             </div>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>💬 Class Teacher's Remark</div>
-            <textarea style={{...S.input,height:70,resize:"vertical",marginBottom:16}} value={remarks.teacher_remark} onChange={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks…"/>
+            <textarea style={{...S.input,height:70,resize:"vertical",marginBottom:16}} defaultValue={remarks.teacher_remark} onBlur={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks…"/>
           </div>
           {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
           <div style={{display:"flex",gap:10,flexDirection:"column"}}>
