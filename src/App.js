@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, supabase, activateUserContext } from './supabaseClient';
+import { useSyncEngine, retryFailed } from './syncEngine';
 
 const NIGERIAN_SUBJECTS = {
   "Primary 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
@@ -1590,6 +1591,42 @@ function NotificationBell({ schoolId }) {
 }
 
 // ── Sidebar Layout Shell ───────────────────────────────────────
+function SyncBanner() {
+  const { online, pendingCount, failedCount, syncing, lastSync, flush } = useSyncEngine();
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => { setDismissed(false); }, [online, pendingCount, failedCount]);
+
+  if (dismissed) return null;
+  if (online && pendingCount === 0 && failedCount === 0) return null;
+
+  const bg      = !online ? '#92400e' : failedCount > 0 ? '#7f1d1d' : '#1e40af';
+  const icon    = !online ? '📵' : failedCount > 0 ? '⚠️' : '🔄';
+  const message = !online
+    ? `Offline — ${pendingCount > 0 ? `${pendingCount} record${pendingCount>1?'s':''} queued` : 'changes saved locally'}`
+    : failedCount > 0
+    ? `${failedCount} record${failedCount>1?'s':''} failed to sync`
+    : syncing
+    ? `Syncing ${pendingCount} record${pendingCount>1?'s':''}\u2026`
+    : `${pendingCount} record${pendingCount>1?'s':''} pending sync`;
+
+  return (
+    <div style={{ background: bg, color:'#fff', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:12, fontWeight:600, gap:8 }}>
+      <span>{icon} {message}</span>
+      <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+        {online && (pendingCount > 0 || failedCount > 0) && (
+          <button onClick={() => failedCount > 0 ? retryFailed() : flush()}
+            style={{ background:'#ffffff25', border:'none', color:'#fff', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:700, cursor:'pointer' }}>
+            {failedCount > 0 ? 'Retry' : 'Sync now'}
+          </button>
+        )}
+        <button onClick={() => setDismissed(true)}
+          style={{ background:'none', border:'none', color:'#ffffffaa', fontSize:14, cursor:'pointer', padding:'0 4px' }}>✕</button>
+      </div>
+    </div>
+  );
+}
+
 function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiveTab, loading, children }) {
   const [open, setOpen] = useState(false);
   const activeTabObj = tabs.find(t => t.id === activeTab);
@@ -1651,6 +1688,9 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
           <button onClick={onLogout} style={{ background:"#ffffff18", border:"1px solid #ffffff25", color:"#fff", borderRadius:12, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700, whiteSpace:"nowrap" }}>Sign Out</button>
         </div>
       </div>
+
+      {/* ── Sync Status Banner ── */}
+      <SyncBanner />
 
       {/* ── Overlay ── */}
       {open && <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, background:"#00000065", zIndex:200, backdropFilter:"blur(2px)" }}/>}
