@@ -1281,6 +1281,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               <div style={{background:"#e0e7ff",borderRadius:10,height:10}}><div style={{background:"#6366f1",height:"100%",width:`${(bulkProgress.done/bulkProgress.total)*100}%`,borderRadius:10,transition:"width 0.3s"}}/></div>
             </div>
           ):(
+            <div>
             <button onClick={handleBulk} style={{...S.btn("#6366f1"),width:"100%",padding:"12px"}}>📦 Bulk Generate & Upload — All {classStudents.length} Report Cards</button>
             {isPrincipal&&<button onClick={()=>setBulkRemarkModal(true)} style={{...S.btn("#f59e0b"),width:"100%",padding:"12px",marginTop:8}}>🏛 Bulk Add Principal Remarks</button>}
             {bulkRemarkModal&&(
@@ -1313,6 +1314,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
                 </div>
               </div>
             )}
+            </div>
           )}
         </div>
       )}
