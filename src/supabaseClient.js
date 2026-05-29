@@ -1,107 +1,132 @@
 import { createClient } from '@supabase/supabase-js';
+import { offlineDB } from './offlineDB';
+import { enqueue, readCache } from './syncEngine';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+const supabaseUrl     = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
-    '❌ Supabase env vars missing. Create a .env file with:\n' +
-    'REACT_APP_SUPABASE_URL=...\n' +
-    'REACT_APP_SUPABASE_ANON_KEY=...'
-  );
-}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// ── Activate RLS user context after login ─────────────────────
-// Called once after login so Supabase RLS policies can identify
-// which user is making each request server-side.
 export async function activateUserContext(userId) {
-  try {
-    await supabase.rpc('set_user_context', { uid: userId });
-  } catch (e) {
-    console.warn('[RLS] set_user_context failed:', e.message);
-  }
+  try { await supabase.rpc('set_user_context', { uid: userId }); } catch (e) {}
 }
 
-// ── Generic helpers used throughout the app ──────────────────
+const CACHEABLE = {
+  students:        'students_cache',
+  classes:         'classes_cache',
+  terms:           'terms_cache',
+  results:         'results_cache',
+  attendance:      'attendance_cache',
+  daily_attendance:'daily_att_cache',
+};
+
+const QUEUEABLE = ['results', 'attendance', 'daily_attendance'];
 
 export const db = {
-  /**
-   * Fetch all rows from a table, with optional filters.
-   * filters: object e.g. { role: 'teacher' } or null
-   */
   get: async (table, filters = null) => {
+    const cacheTable = CACHEABLE[table];
+    if (!navigator.onLine && cacheTable) {
+      try { return await readCache(cacheTable, filters); } catch (e) {}
+    }
     let query = supabase.from(table).select('*');
     if (filters) {
       Object.entries(filters).forEach(([col, val]) => {
-        if (Array.isArray(val)) {
-          query = query.in(col, val);
-        } else {
-          query = query.eq(col, val);
-        }
+        query = Array.isArray(val) ? query.in(col, val) : query.eq(col, val);
       });
     }
     const { data, error } = await query;
     if (error) {
-      console.error('db.get(' + table + ') error:', error.message);
+      if (cacheTable) {
+        try { return await readCache(cacheTable, filters); } catch (e) {}
+      }
       return [];
+    }
+    if (data && cacheTable) {
+      try { await offlineDB[cacheTable].bulkPut(data); } catch (e) {}
     }
     return data || [];
   },
 
-  /** Insert a row and return the inserted record. */
   post: async (table, payload) => {
-    const { data, error } = await supabase
-      .from(table)
-      .insert(payload)
-      .select()
-      .single();
+    if (!navigator.onLine && QUEUEABLE.includes(table)) {
+      const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const record = { ...payload, id: tempId, _offline: true };
+      const cacheTable = CACHEABLE[table];
+      if (cacheTable) {
+        try { await offlineDB[cacheTable].put(record); } catch (e) {}
+      }
+      await enqueue(table, 'insert', payload);
+      return record;
+    }
+    const { data, error } = await supabase.from(table).insert(payload).select().single();
     if (error) {
-      console.error('db.post(' + table + ') error:', error.message, '| hint:', error.hint, '| details:', error.details, '| code:', error.code);
+      if (QUEUEABLE.includes(table)) {
+        const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const record = { ...payload, id: tempId, _offline: true };
+        const cacheTable = CACHEABLE[table];
+        if (cacheTable) { try { await offlineDB[cacheTable].put(record); } catch (e) {} }
+        await enqueue(table, 'insert', payload);
+        return record;
+      }
       return null;
     }
+    const cacheTable = CACHEABLE[table];
+    if (data && cacheTable) { try { await offlineDB[cacheTable].put(data); } catch (e) {} }
     return data;
   },
 
-  /** Update a row by id and return the updated record. */
   patch: async (table, id, payload) => {
-    const { data, error } = await supabase
-      .from(table)
-      .update(payload)
-      .eq('id', id)
-      .select()
-      .single();
+    const full = { ...payload, id };
+    if (!navigator.onLine && QUEUEABLE.includes(table)) {
+      const cacheTable = CACHEABLE[table];
+      if (cacheTable) {
+        try { await offlineDB[cacheTable].update(id, payload); } catch (e) {}
+      }
+      await enqueue(table, 'update', full);
+      return full;
+    }
+    const { data, error } = await supabase.from(table).update(payload).eq('id', id).select().single();
     if (error) {
-      console.error('db.patch(' + table + ') error:', error.message);
+      if (QUEUEABLE.includes(table)) {
+        const cacheTable = CACHEABLE[table];
+        if (cacheTable) { try { await offlineDB[cacheTable].update(id, payload); } catch (e) {} }
+        await enqueue(table, 'update', full);
+        return full;
+      }
       return null;
     }
+    const cacheTable = CACHEABLE[table];
+    if (data && cacheTable) { try { await offlineDB[cacheTable].put(data); } catch (e) {} }
     return data;
   },
 
-  /** Delete a row by id. */
+  upsert: async (table, payload, conflictCol) => {
+    const col = conflictCol || 'id';
+    if (!navigator.onLine && QUEUEABLE.includes(table)) {
+      const cacheTable = CACHEABLE[table];
+      if (cacheTable) { try { await offlineDB[cacheTable].put(payload); } catch (e) {} }
+      await enqueue(table, 'upsert', payload, col);
+      return payload;
+    }
+    const { data, error } = await supabase.from(table).upsert(payload, { onConflict: col }).select().single();
+    if (error) {
+      if (QUEUEABLE.includes(table)) {
+        const cacheTable = CACHEABLE[table];
+        if (cacheTable) { try { await offlineDB[cacheTable].put(payload); } catch (e) {} }
+        await enqueue(table, 'upsert', payload, col);
+        return payload;
+      }
+      return null;
+    }
+    const cacheTable = CACHEABLE[table];
+    if (data && cacheTable) { try { await offlineDB[cacheTable].put(data); } catch (e) {} }
+    return data;
+  },
+
   delete: async (table, id) => {
     const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) {
-      console.error('db.delete(' + table + ') error:', error.message);
-    }
-  },
-
-  /**
-   * Upsert (insert or update) based on a conflict column.
-   * conflictCol: column name to match on, e.g. 'id'
-   */
-  upsert: async (table, payload, conflictCol) => {
-    var col = conflictCol || 'id';
-    const { data, error } = await supabase
-      .from(table)
-      .upsert(payload, { onConflict: col })
-      .select()
-      .single();
-    if (error) {
-      console.error('db.upsert(' + table + ') error:', error.message);
-      return null;
-    }
-    return data;
+    if (error) console.error('db.delete error:', error.message);
+    const cacheTable = CACHEABLE[table];
+    if (cacheTable) { try { await offlineDB[cacheTable].delete(id); } catch (e) {} }
   },
 };
