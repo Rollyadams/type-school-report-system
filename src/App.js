@@ -136,7 +136,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   },0);
   const ranked=[...allStudents.map(s=>s.id)].sort((a,b)=>getStudentTotal(b)-getStudentTotal(a));
   const pos=ranked.indexOf(student.id)+1;
-  const promotionStatus=remarks?.promotion_status||"";
+  const promotionStatus=remarks?.promotion_status||(avg>=40?"Promoted":"Repeated");
 
   const summaryItems=[
     ["Total Marks",String(totalMarks),"#6366f1"],
@@ -1174,7 +1174,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     const avg=sResults.length?Math.round(totalMarks/sResults.length):0;
     const pos=getPosition(reportStudent.id);
     const overall=getGrade(avg);
-    const promotionStatus=rem?.promotion_status;
+    const promotionStatus=rem?.promotion_status||(avg>=40?"Promoted":"Repeated");
     return(
       <div>
         <div style={{display:"flex",gap:8,padding:"12px 0",flexWrap:"wrap"}}>
