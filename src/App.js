@@ -2078,11 +2078,236 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
   );
 }
 
+// ── Receipt / Invoice ──────────────────────────────────────────
+const FEE_ITEMS = [
+  { id:"tuition",   label:"School Fees (Tuition)" },
+  { id:"uniform",   label:"Uniform" },
+  { id:"books",     label:"Books & Stationery" },
+  { id:"supplies",  label:"School Supplies" },
+  { id:"pta",       label:"PTA Levy" },
+  { id:"custom",    label:"Other (custom)" },
+];
+
+const generateReceiptPDF = async (receipt, student, cls, term, school, logoDataUrl) => {
+  const { jsPDF } = await loadJsPDF();
+  const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+  const W = 210; let y = 0;
+  doc.setFillColor(30,58,138); doc.rect(0,0,W,50,"F");
+  if (logoDataUrl) { try { doc.addImage(logoDataUrl,"PNG",12,8,28,28); } catch(e){} }
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(18); doc.setFont(undefined,"bold");
+  doc.text((school?.name||"School").toUpperCase(), W/2, 20, {align:"center"});
+  doc.setFontSize(9); doc.setFont(undefined,"normal");
+  if (school?.address) doc.text(school.address, W/2, 28, {align:"center"});
+  if (school?.phone)   doc.text("Tel: "+school.phone, W/2, 34, {align:"center"});
+  doc.setFontSize(14); doc.setFont(undefined,"bold");
+  doc.text("OFFICIAL PAYMENT RECEIPT", W/2, 44, {align:"center"});
+  y = 58;
+  doc.setDrawColor(30,58,138); doc.setLineWidth(0.4);
+  doc.setFillColor(240,245,255); doc.roundedRect(12, y, W-24, 28, 3, 3, "FD");
+  doc.setTextColor(30,58,138); doc.setFontSize(9); doc.setFont(undefined,"bold");
+  doc.text("Receipt No: "+receipt.receipt_no, 18, y+8);
+  doc.text("Date: "+receipt.date, 18, y+15);
+  doc.text("Term: "+(term?.name||"—"), 18, y+22);
+  doc.text("Issued By: "+(receipt.issued_by||"Principal"), W/2+5, y+8);
+  doc.text("Payment Method: "+(receipt.payment_method||"Cash"), W/2+5, y+15);
+  y += 35;
+  doc.setFillColor(248,250,252); doc.roundedRect(12, y, W-24, 22, 3, 3, "F");
+  doc.setTextColor(30,41,59); doc.setFontSize(9); doc.setFont(undefined,"bold");
+  doc.text("STUDENT DETAILS", 18, y+7);
+  doc.setFont(undefined,"normal"); doc.setFontSize(10);
+  doc.text("Name: "+student.full_name, 18, y+14);
+  doc.text("Admission No: "+(student.admission_number||"—")+"   Class: "+(cls?.name||"")+" "+(cls?.arm||""), 18, y+20);
+  y += 29;
+  doc.setFillColor(30,58,138); doc.rect(12, y, W-24, 10, "F");
+  doc.setTextColor(255,255,255); doc.setFontSize(9); doc.setFont(undefined,"bold");
+  doc.text("DESCRIPTION", 18, y+7);
+  doc.text("QTY", 130, y+7, {align:"center"});
+  doc.text("UNIT PRICE (N)", 165, y+7, {align:"center"});
+  doc.text("AMOUNT (N)", W-14, y+7, {align:"right"});
+  y += 10;
+  doc.setTextColor(30,41,59); doc.setFont(undefined,"normal");
+  let subtotal = 0;
+  receipt.items.forEach(function(item, i) {
+    const amt = item.qty * item.unit_price;
+    subtotal += amt;
+    if (i%2===0) { doc.setFillColor(255,255,255); } else { doc.setFillColor(248,250,252); }
+    doc.rect(12, y, W-24, 9, "F");
+    doc.setFontSize(9);
+    doc.text(item.label, 18, y+6);
+    doc.text(String(item.qty), 130, y+6, {align:"center"});
+    doc.text(item.unit_price.toLocaleString("en-NG"), 165, y+6, {align:"center"});
+    doc.text(amt.toLocaleString("en-NG"), W-14, y+6, {align:"right"});
+    y += 9;
+  });
+  doc.setDrawColor(30,58,138); doc.setLineWidth(0.3);
+  doc.line(12, y+2, W-12, y+2); y += 7;
+  const discount = receipt.discount || 0;
+  const total = subtotal - discount;
+  [["Subtotal:", subtotal],["Discount:", discount],["TOTAL PAID:", total]].forEach(function(pair, i) {
+    if (i===2) { doc.setFont(undefined,"bold"); doc.setFontSize(11); doc.setTextColor(30,58,138); }
+    else { doc.setFont(undefined,"normal"); doc.setFontSize(9); doc.setTextColor(100,116,139); }
+    doc.text(pair[0], 140, y+7);
+    doc.text("N"+pair[1].toLocaleString("en-NG"), W-14, y+7, {align:"right"});
+    y += 9;
+  });
+  y += 4;
+  if (receipt.notes) {
+    doc.setFontSize(9); doc.setFont(undefined,"italic"); doc.setTextColor(100,116,139);
+    doc.text("Note: "+receipt.notes, 14, y+6); y += 12;
+  }
+  doc.setFillColor(30,58,138); doc.rect(0, 275, W, 22, "F");
+  doc.setTextColor(255,255,255); doc.setFontSize(8); doc.setFont(undefined,"normal");
+  doc.text("This is an official receipt. Please keep for your records.", W/2, 282, {align:"center"});
+  doc.text((school?.name||"School")+" - "+new Date().getFullYear(), W/2, 290, {align:"center"});
+  doc.save("Receipt_"+receipt.receipt_no+"_"+student.full_name.replace(/ /g,"_")+".pdf");
+};
+
+function ReceiptInvoice({ students, classes, terms, school, user, logoDataUrl }) {
+  const today = new Date().toISOString().split("T")[0];
+  const currentTerm = terms.find(function(t){return t.is_current;}) || terms[0];
+  const blankForm = function() {
+    return {
+      student_id:"", term_id:currentTerm?.id||"", date:today,
+      payment_method:"Cash", discount:"", notes:"",
+      items:[{fee_type:"tuition",label:"School Fees (Tuition)",qty:1,unit_price:""}],
+    };
+  };
+  const [form,setForm]=useState(blankForm());
+  const [generating,setGenerating]=useState(false);
+  const [success,setSuccess]=useState(false);
+  const [filterClass,setFilterClass]=useState("");
+
+  const filteredStudents = filterClass ? students.filter(function(s){return s.class_id===filterClass;}) : students;
+  const selectedStudent  = students.find(function(s){return s.id===form.student_id;});
+  const selectedClass    = classes.find(function(c){return c.id===selectedStudent?.class_id;});
+  const selectedTerm     = terms.find(function(t){return t.id===form.term_id;});
+
+  const updateItem=function(i,field,val){
+    setForm(function(p){
+      const items=[...p.items]; items[i]={...items[i],[field]:val};
+      if(field==="fee_type"){const found=FEE_ITEMS.find(function(f){return f.id===val;});if(found&&found.id!=="custom")items[i].label=found.label;}
+      return {...p,items};
+    });
+  };
+  const addItem=function(){setForm(function(p){return {...p,items:[...p.items,{fee_type:"custom",label:"",qty:1,unit_price:""}]};});};
+  const removeItem=function(i){setForm(function(p){return {...p,items:p.items.filter(function(_,idx){return idx!==i;})};});};
+
+  const subtotal=form.items.reduce(function(s,it){return s+(Number(it.qty)||0)*(Number(it.unit_price)||0);},0);
+  const discount=Number(form.discount)||0;
+  const total=subtotal-discount;
+
+  const handleGenerate=async function(){
+    if(!form.student_id){alert("Please select a student.");return;}
+    if(form.items.some(function(it){return !it.unit_price;})){alert("Please fill in all item prices.");return;}
+    setGenerating(true);
+    const receipt_no="RCP-"+Date.now().toString(36).toUpperCase();
+    const receipt={...form,receipt_no,issued_by:user.full_name||"Principal",discount,
+      items:form.items.map(function(it){return {...it,qty:Number(it.qty)||1,unit_price:Number(it.unit_price)||0};})};
+    await generateReceiptPDF(receipt,selectedStudent,selectedClass,selectedTerm,school,logoDataUrl);
+    setGenerating(false);setSuccess(true);setTimeout(function(){setSuccess(false);},3000);
+  };
+
+  return (
+    <div>
+      <div style={S.section("#7c3aed")}><span>🧾</span><span style={{fontWeight:800,color:"#7c3aed"}}>Receipt / Invoice</span></div>
+
+      <div style={S.card}>
+        <label style={S.label}>Filter by Class</label>
+        <select style={{...S.input,marginBottom:12}} value={filterClass} onChange={function(e){setFilterClass(e.target.value);setForm(function(p){return {...p,student_id:""};});}}>
+          <option value="">All Classes</option>
+          {classes.map(function(c){return <option key={c.id} value={c.id}>{c.name} {c.arm}</option>;})}
+        </select>
+        <label style={S.label}>Student *</label>
+        <select style={S.input} value={form.student_id} onChange={function(e){setForm(function(p){return {...p,student_id:e.target.value};});}}>
+          <option value="">Select student…</option>
+          {filteredStudents.map(function(s){const cls=classes.find(function(c){return c.id===s.class_id;});return <option key={s.id} value={s.id}>{s.full_name}{cls?" — "+cls.name+" "+cls.arm:""}</option>;})}
+        </select>
+      </div>
+
+      <div style={S.card}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div><label style={S.label}>Date</label><input type="date" style={S.input} value={form.date} max={today} onChange={function(e){setForm(function(p){return {...p,date:e.target.value};});}}/></div>
+          <div><label style={S.label}>Term</label>
+            <select style={S.input} value={form.term_id} onChange={function(e){setForm(function(p){return {...p,term_id:e.target.value};});}}>
+              <option value="">Select term…</option>
+              {terms.map(function(t){return <option key={t.id} value={t.id}>{t.name}</option>;})}
+            </select>
+          </div>
+        </div>
+        <label style={S.label}>Payment Method</label>
+        <select style={S.input} value={form.payment_method} onChange={function(e){setForm(function(p){return {...p,payment_method:e.target.value};});}}>
+          {["Cash","Bank Transfer","POS/Card","Cheque","Other"].map(function(m){return <option key={m}>{m}</option>;})}
+        </select>
+      </div>
+
+      <div style={S.card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <span style={{fontWeight:800,color:"#1e293b",fontSize:14}}>Payment Items</span>
+          <button onClick={addItem} style={{...S.btn("#7c3aed"),padding:"6px 14px",fontSize:12}}>+ Add Item</button>
+        </div>
+        {form.items.map(function(item,i){return (
+          <div key={i} style={{background:"#f8fafc",borderRadius:10,padding:12,marginBottom:10,border:"1.5px solid #e2e8f0"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <span style={{fontSize:12,fontWeight:700,color:"#64748b"}}>Item {i+1}</span>
+              {form.items.length>1&&<button onClick={function(){removeItem(i);}} style={{background:"#fee2e2",border:"none",borderRadius:6,color:"#ef4444",padding:"2px 8px",cursor:"pointer",fontSize:12,fontWeight:700}}>x</button>}
+            </div>
+            <label style={S.label}>Type</label>
+            <select style={{...S.input,marginBottom:8}} value={item.fee_type} onChange={function(e){updateItem(i,"fee_type",e.target.value);}}>
+              {FEE_ITEMS.map(function(f){return <option key={f.id} value={f.id}>{f.label}</option>;})}
+            </select>
+            {item.fee_type==="custom"&&<><label style={S.label}>Description</label><input style={{...S.input,marginBottom:8}} placeholder="e.g. Exam levy" value={item.label} onChange={function(e){updateItem(i,"label",e.target.value);}}/></>}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <div><label style={S.label}>Qty</label><input type="number" style={S.input} min="1" value={item.qty} onChange={function(e){updateItem(i,"qty",e.target.value);}}/></div>
+              <div><label style={S.label}>Unit Price (N)</label><input type="number" style={S.input} min="0" placeholder="0" value={item.unit_price} onChange={function(e){updateItem(i,"unit_price",e.target.value);}}/></div>
+            </div>
+            <div style={{textAlign:"right",marginTop:6,fontSize:12,fontWeight:700,color:"#7c3aed"}}>= N{((Number(item.qty)||0)*(Number(item.unit_price)||0)).toLocaleString("en-NG")}</div>
+          </div>
+        );})}
+        <div style={{borderTop:"1.5px solid #e2e8f0",paddingTop:12,marginTop:4}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontSize:13,color:"#64748b",fontWeight:600}}>Subtotal</span>
+            <span style={{fontSize:13,fontWeight:700,color:"#1e293b"}}>N{subtotal.toLocaleString("en-NG")}</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <span style={{fontSize:13,color:"#64748b",fontWeight:600}}>Discount (N)</span>
+            <input type="number" min="0" value={form.discount} onChange={function(e){setForm(function(p){return {...p,discount:e.target.value};});}} style={{...S.input,width:120,textAlign:"right",padding:"6px 10px"}} placeholder="0"/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",background:"#7c3aed15",borderRadius:10,padding:"10px 14px"}}>
+            <span style={{fontSize:15,fontWeight:800,color:"#7c3aed"}}>TOTAL</span>
+            <span style={{fontSize:15,fontWeight:900,color:"#7c3aed"}}>N{total.toLocaleString("en-NG")}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <label style={S.label}>Notes (optional)</label>
+        <textarea style={{...S.input,minHeight:60,resize:"vertical"}} placeholder="e.g. Balance outstanding, payment plan, etc." value={form.notes} onChange={function(e){setForm(function(p){return {...p,notes:e.target.value};});}}/>
+      </div>
+
+      {success&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>Receipt PDF downloaded!</div>}
+
+      <button onClick={handleGenerate} disabled={generating} style={{...S.btn("#7c3aed"),width:"100%",padding:14,fontSize:15}}>
+        {generating?"Generating...":"Generate & Download Receipt PDF"}
+      </button>
+      <button onClick={function(){setForm(blankForm());setSuccess(false);}} style={{...S.btn("#e2e8f0"),color:"#64748b",width:"100%",padding:12,fontSize:13,marginTop:10}}>
+        Clear Form
+      </button>
+    </div>
+  );
+}
+
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
   const [students,setStudents]=useState([]); const [classes,setClasses]=useState([]);
   const [teachers,setTeachers]=useState([]); const [sessions,setSessions]=useState([]);
   const [terms,setTerms]=useState([]); const [school,setSchool]=useState(null); const [loading,setLoading]=useState(true);
+  const [logoDataUrl,setLogoDataUrl]=useState(null);
+
+  useEffect(()=>{
+    if(!school?.logo_url){setLogoDataUrl(null);return;}
+    fetch(school.logo_url).then(r=>r.blob()).then(blob=>new Promise(res=>{const reader=new FileReader();reader.onload=()=>res(reader.result);reader.readAsDataURL(blob);})).then(setLogoDataUrl).catch(()=>setLogoDataUrl(null));
+  },[school?.logo_url]);
 
   useEffect(()=>{loadAll();},[]);
   const loadAll=async()=>{
@@ -2105,6 +2330,7 @@ function PrincipalDash({ user, onLogout }) {
     {id:"classes",  label:"Classes",   icon:"🏫", desc:"Manage class arms"},
     {id:"teachers", label:"Teachers",  icon:"👩‍🏫", desc:"Staff & class assignment"},
     {id:"results",  label:"Results",   icon:"📋", desc:"View & generate report cards"},
+    {id:"receipts", label:"Receipts",  icon:"🧾", desc:"Issue payment receipts"},
     {id:"messages", label:"Messages",  icon:"📨", desc:"WhatsApp parent messages"},
     {id:"settings", label:"Settings",  icon:"⚙️", desc:"School config & admin"},
   ];
@@ -2116,6 +2342,7 @@ function PrincipalDash({ user, onLogout }) {
       {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
       {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
+      {tab==="receipts"&&<ReceiptInvoice students={students} classes={classes} terms={terms} school={school} user={user} logoDataUrl={logoDataUrl}/>}
       {tab==="messages"&&<Messages students={students} classes={classes} school={school}/>}
       {tab==="settings"&&<SchoolSettings school={school} sessions={sessions} terms={terms} students={students} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
     </SidebarLayout>
