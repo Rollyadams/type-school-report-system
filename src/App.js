@@ -40,13 +40,13 @@ const MESSAGE_TEMPLATES = {
 };
 
 const getGrade = (score) => {
-  if (score >= 90) return { g:"A+", r:"Outstanding",   col:"#059669" };
-  if (score >= 80) return { g:"A",  r:"Excellent",     col:"#10b981" };
-  if (score >= 70) return { g:"B",  r:"Very Good",     col:"#2563eb" };
-  if (score >= 60) return { g:"C",  r:"Good",          col:"#d97706" };
-  if (score >= 50) return { g:"D",  r:"Average",       col:"#ea580c" };
-  if (score >= 40) return { g:"E",  r:"Below Average", col:"#dc2626" };
-  return                   { g:"F",  r:"Fail",          col:"#7f1d1d" };
+  if (score >= 90) return { g:"A",  r:"Outstanding",   col:"#059669" };
+  if (score >= 80) return { g:"B",  r:"Excellent",     col:"#10b981" };
+  if (score >= 70) return { g:"C",  r:"Very Good",     col:"#2563eb" };
+  if (score >= 60) return { g:"D",  r:"Good",          col:"#d97706" };
+  if (score >= 50) return { g:"E",  r:"Average",       col:"#ea580c" };
+  if (score >= 40) return { g:"F",  r:"Below Average", col:"#dc2626" };
+  return                   { g:"G",  r:"Fail",          col:"#7f1d1d" };
 };
 const ordinal = (n) => { const s=["th","st","nd","rd"],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
 
@@ -1099,47 +1099,71 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     return totals.findIndex(t=>t.id===sid)+1;
   };
 
+  const REMARK_TEMPLATES=[
+    "Excellent performance. Keep it up!",
+    "Very good effort. Continue to strive for excellence.",
+    "Good work. There is room for improvement.",
+    "Fair performance. More effort is needed.",
+    "Below expectation. Please put in more effort next term.",
+    "Outstanding result. We are proud of you.",
+    "Satisfactory performance. Aim higher next term.",
+  ];
+  const [bulkRemarkModal,setBulkRemarkModal]=useState(false);
+  const [bulkRemarkText,setBulkRemarkText]=useState("");
+  const [bulkRemarkTarget,setBulkRemarkTarget]=useState("class");
+
   const handleGenerate=async(student)=>{
+    const rem=remarks.find(r=>r.student_id===student.id);
+    if(!rem?.principal_remark){alert("⛔ Principal's remark required before sending.\n\nAdd a remark for this student first.");return;}
     setGenerating(student.id);
     try{
       const cls2=classes.find(c=>c.id===student.class_id);
       const subs=cls2?(NIGERIAN_SUBJECTS[cls2.name]||[]):[];
       const att=attendance.find(a=>a.student_id===student.id);
-      const rem=remarks.find(r=>r.student_id===student.id);
-      await generateReportPDF(student,cls2,term,subs,results.filter(r=>r.student_id===student.id),att,rem,classStudents,results,school,logoDataUrl);
-      setTimeout(()=>{
-        const phone=student.guardian_phone?.replace(/\D/g,"");
-        const msg=`Dear ${student.guardian_name||"Parent"}, please find attached the report card for ${student.full_name} — ${term?.name||""} — ${school?.name||""}. Please print and sign.`;
-        window.open(`https://wa.me/234${phone?.slice(-10)}?text=${encodeURIComponent(msg)}`,"_blank");
-        setGenerating(null);
-      },1500);
-    }catch(e){alert("Error: "+e.message);setGenerating(null);}
+      const blob=await generateReportPDF(student,cls2,term,subs,results.filter(r=>r.student_id===student.id),att,rem,classStudents,results,school,logoDataUrl);
+      await uploadAndSaveReport(blob,student,term,rem?.id,school?.id);
+      await sharePDFFile(blob,student,term,student.guardian_name);
+    }catch(e){alert("Error: "+e.message);}
+    setGenerating(null);
   };
 
   const handleBulk=async()=>{
     if(!classStudents.length) return;
-    if(!window.confirm(`Download all ${classStudents.length} report cards for ${cls?.name} ${cls?.arm||""}?`)) return;
+    const missing=classStudents.filter(s=>!remarks.find(r=>r.student_id===s.id)?.principal_remark);
+    if(missing.length){alert(`⛔ ${missing.length} student(s) missing principal remark.\n${missing.map(s=>s.full_name).join("\n")}`);return;}
+    if(!window.confirm(`Generate & share all ${classStudents.length} report cards?`)) return;
     setBulkGenerating(true); setBulkProgress({done:0,total:classStudents.length});
     for(let i=0;i<classStudents.length;i++){
       const student=classStudents[i];
       const att=attendance.find(a=>a.student_id===student.id);
       const rem=remarks.find(r=>r.student_id===student.id);
       try{
-        await generateReportPDF(student,cls,term,subjects,results.filter(r=>r.student_id===student.id),att,rem,classStudents,results,school,logoDataUrl);
-        await new Promise(r=>setTimeout(r,800));
+        const blob=await generateReportPDF(student,cls,term,subjects,results.filter(r=>r.student_id===student.id),att,rem,classStudents,results,school,logoDataUrl);
+        await uploadAndSaveReport(blob,student,term,rem?.id,school?.id);
+        await new Promise(r=>setTimeout(r,600));
       }catch(e){console.error(e);}
       setBulkProgress({done:i+1,total:classStudents.length});
     }
-    setBulkGenerating(false); alert("✅ All report cards generated!");
+    setBulkGenerating(false); alert("✅ All report cards generated & uploaded!");
   };
 
   const updatePrincipalRemark=async(sid,remark)=>{
     const rem=remarks.find(r=>r.student_id===sid);
     if(rem?.id) await db.patch("remarks",rem.id,{principal_remark:remark});
     else await db.post("remarks",{student_id:sid,term_id:selectedTerm,principal_remark:remark});
-    const ids=classStudents.map(s=>s.id);
-    const updated=await db.get("remarks",{term_id:selectedTerm,student_id:ids});
-    setRemarks(updated);
+    setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
+  };
+
+  const applyBulkRemark=async()=>{
+    if(!bulkRemarkText.trim()){alert("Please enter or select a remark");return;}
+    const targets=bulkRemarkTarget==="class"?classStudents:[classStudents.find(s=>s.id===bulkRemarkTarget)].filter(Boolean);
+    for(const student of targets){
+      const rem=remarks.find(r=>r.student_id===student.id);
+      if(rem?.id) await db.patch("remarks",rem.id,{principal_remark:bulkRemarkText});
+      else await db.post("remarks",{student_id:student.id,term_id:selectedTerm,principal_remark:bulkRemarkText});
+    }
+    setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
+    setBulkRemarkModal(false); setBulkRemarkText("");
   };
 
   if(reportStudent){
@@ -1156,13 +1180,18 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
         <div style={{display:"flex",gap:8,padding:"12px 0",flexWrap:"wrap"}}>
           <button onClick={()=>setReportStudent(null)} style={S.btn("#64748b")}>← Back</button>
           <button onClick={()=>window.print()} style={S.btn("#10b981")}>🖨 Print</button>
-          <button onClick={()=>handleGenerate(reportStudent)} disabled={!!generating} style={S.btn("#25d366")}>{generating===reportStudent.id?"⏳ Generating…":"📥 PDF & WhatsApp"}</button>
+          <button onClick={()=>handleGenerate(reportStudent)} disabled={!!generating} style={S.btn("#25d366")}>{generating===reportStudent.id?"⏳ Generating…":"📤 PDF & Share"}</button>
         </div>
         {isPrincipal&&(
           <div style={{...S.card,marginBottom:16}}>
-            <div style={{fontWeight:700,color:"#1e293b",marginBottom:8}}>🏛 Principal's Remark</div>
-            <textarea style={{...S.input,height:70,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Enter principal's remarks…"/>
-            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>Click outside to save.</div>
+            <div style={{fontWeight:700,color:"#1e293b",marginBottom:8}}>🏛 Principal's Remark {!rem?.principal_remark&&<span style={{color:"#ef4444",fontSize:11}}>* Required before sending</span>}</div>
+            <textarea style={{...S.input,height:60,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Type remark or pick template below…"/>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
+              {REMARK_TEMPLATES.map(t=>(
+                <button key={t} onClick={()=>updatePrincipalRemark(reportStudent.id,t)} style={{background:"#f1f5f9",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",color:"#475569"}}>{t}</button>
+              ))}
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Tap template to apply instantly. Or type and click outside.</div>
           </div>
         )}
         <div id="report-card" style={{background:"#fff",borderRadius:20,overflow:"hidden",boxShadow:"0 8px 40px #0000001a",fontFamily:"Georgia,serif"}}>
@@ -1252,7 +1281,38 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               <div style={{background:"#e0e7ff",borderRadius:10,height:10}}><div style={{background:"#6366f1",height:"100%",width:`${(bulkProgress.done/bulkProgress.total)*100}%`,borderRadius:10,transition:"width 0.3s"}}/></div>
             </div>
           ):(
-            <button onClick={handleBulk} style={{...S.btn("#6366f1"),width:"100%",padding:"12px"}}>📦 Bulk Download — All {classStudents.length} Report Cards</button>
+            <button onClick={handleBulk} style={{...S.btn("#6366f1"),width:"100%",padding:"12px"}}>📦 Bulk Generate & Upload — All {classStudents.length} Report Cards</button>
+            {isPrincipal&&<button onClick={()=>setBulkRemarkModal(true)} style={{...S.btn("#f59e0b"),width:"100%",padding:"12px",marginTop:8}}>🏛 Bulk Add Principal Remarks</button>}
+            {bulkRemarkModal&&(
+              <div style={{position:"fixed",inset:0,background:"#00000088",zIndex:9999,display:"flex",alignItems:"flex-end"}} onClick={()=>setBulkRemarkModal(false)}>
+                <div style={{background:"#fff",borderRadius:"20px 20px 0 0",padding:24,width:"100%",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+                  <div style={{fontWeight:800,fontSize:16,marginBottom:12}}>🏛 Bulk Principal Remarks</div>
+                  <div style={{marginBottom:12}}>
+                    <label style={S.label}>Apply to</label>
+                    <select style={S.input} value={bulkRemarkTarget} onChange={e=>setBulkRemarkTarget(e.target.value)}>
+                      <option value="class">Entire Class ({classStudents.length} students)</option>
+                      {classStudents.map(s=><option key={s.id} value={s.id}>{s.full_name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:12}}>
+                    <label style={S.label}>Choose Template</label>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {REMARK_TEMPLATES.map(t=>(
+                        <button key={t} onClick={()=>setBulkRemarkText(t)} style={{background:bulkRemarkText===t?"#e0e7ff":"#f8fafc",border:`1.5px solid ${bulkRemarkText===t?"#6366f1":"#e2e8f0"}`,borderRadius:10,padding:"10px 14px",textAlign:"left",cursor:"pointer",fontSize:13,color:"#1e293b"}}>{t}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{marginBottom:16}}>
+                    <label style={S.label}>Or Type Custom Remark</label>
+                    <textarea style={{...S.input,height:60}} value={bulkRemarkText} onChange={e=>setBulkRemarkText(e.target.value)} placeholder="Type custom remark…"/>
+                  </div>
+                  <div style={{display:"flex",gap:10}}>
+                    <button onClick={()=>setBulkRemarkModal(false)} style={{...S.btn("#94a3b8"),flex:1}}>Cancel</button>
+                    <button onClick={applyBulkRemark} style={{...S.btn("#6366f1"),flex:2}}>✅ Apply Remark</button>
+                  </div>
+                </div>
+              </div>
+            )}
           )}
         </div>
       )}
