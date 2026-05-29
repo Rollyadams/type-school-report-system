@@ -1718,6 +1718,366 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
   );
 }
 
+// ── Daily Attendance ────────────────────────────────────────────
+function DailyAttendance({ user, classes, terms, students: allStudents }) {
+  const today = new Date().toISOString().split('T')[0];
+  const [selectedClass, setSelectedClass] = useState(user.class_id || '');
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [records, setRecords] = useState({}); // { student_id: 'present'|'absent'|'late' }
+  const [existingIds, setExistingIds] = useState({}); // { student_id: db_row_id }
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [viewDate, setViewDate] = useState(today);
+  const [summaryData, setSummaryData] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [subView, setSubView] = useState('mark'); // 'mark' | 'summary'
+
+  const classStudents = allStudents.filter(s => s.class_id === selectedClass);
+  const cls = classes.find(c => c.id === selectedClass);
+
+  // Load attendance records for selected class + date
+  useEffect(() => {
+    if (!selectedClass || !selectedDate) return;
+    setLoading(true);
+    setSaved(false);
+    supabase
+      .from('daily_attendance')
+      .select('*')
+      .eq('class_id', selectedClass)
+      .eq('date', selectedDate)
+      .then(({ data }) => {
+        const rec = {}, ids = {};
+        (data || []).forEach(row => {
+          rec[row.student_id] = row.status;
+          ids[row.student_id] = row.id;
+        });
+        setRecords(rec);
+        setExistingIds(ids);
+        setLoading(false);
+        if (data && data.length > 0) setSaved(true);
+      });
+  }, [selectedClass, selectedDate]);
+
+  // Load summary for summary view
+  useEffect(() => {
+    if (subView !== 'summary' || !selectedClass) return;
+    setSummaryLoading(true);
+    supabase
+      .from('daily_attendance')
+      .select('*')
+      .eq('class_id', selectedClass)
+      .order('date', { ascending: false })
+      .then(({ data }) => {
+        setSummaryData(data || []);
+        setSummaryLoading(false);
+      });
+  }, [subView, selectedClass]);
+
+  const setStatus = (studentId, status) => {
+    setSaved(false);
+    setRecords(p => ({ ...p, [studentId]: status }));
+  };
+
+  const markAll = (status) => {
+    setSaved(false);
+    const updated = {};
+    classStudents.forEach(s => { updated[s.id] = status; });
+    setRecords(updated);
+  };
+
+  const saveAttendance = async () => {
+    if (!selectedClass || !selectedDate) return;
+    setSaving(true);
+    for (const student of classStudents) {
+      const status = records[student.id] || 'absent';
+      const payload = {
+        class_id: selectedClass,
+        student_id: student.id,
+        date: selectedDate,
+        status,
+        school_id: user.school_id,
+        marked_by: user.id,
+      };
+      const existingId = existingIds[student.id];
+      if (existingId) {
+        await supabase.from('daily_attendance').update({ status }).eq('id', existingId);
+      } else {
+        const { data } = await supabase.from('daily_attendance').insert(payload).select().single();
+        if (data) setExistingIds(p => ({ ...p, [student.id]: data.id }));
+      }
+    }
+    setSaving(false);
+    setSaved(true);
+  };
+
+  // Summary helpers
+  const getSummaryByDate = () => {
+    if (!summaryData) return [];
+    const byDate = {};
+    summaryData.forEach(row => {
+      if (!byDate[row.date]) byDate[row.date] = { date: row.date, present: 0, absent: 0, late: 0 };
+      byDate[row.date][row.status] = (byDate[row.date][row.status] || 0) + 1;
+    });
+    return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date));
+  };
+
+  const getStudentSummary = () => {
+    if (!summaryData) return [];
+    const byStudent = {};
+    summaryData.forEach(row => {
+      if (!byStudent[row.student_id]) byStudent[row.student_id] = { student_id: row.student_id, present: 0, absent: 0, late: 0, total: 0 };
+      byStudent[row.student_id][row.status] = (byStudent[row.student_id][row.status] || 0) + 1;
+      byStudent[row.student_id].total += 1;
+    });
+    return Object.values(byStudent).map(r => ({
+      ...r,
+      student: classStudents.find(s => s.id === r.student_id),
+    })).filter(r => r.student).sort((a, b) => b.absent - a.absent);
+  };
+
+  const statusConfig = {
+    present: { label: 'Present', color: '#10b981', bg: '#f0fdf4', border: '#10b981' },
+    late:    { label: 'Late',    color: '#f59e0b', bg: '#fffbeb', border: '#f59e0b' },
+    absent:  { label: 'Absent',  color: '#ef4444', bg: '#fef2f2', border: '#ef4444' },
+  };
+
+  const presentCount  = classStudents.filter(s => records[s.id] === 'present').length;
+  const lateCount     = classStudents.filter(s => records[s.id] === 'late').length;
+  const absentCount   = classStudents.filter(s => !records[s.id] || records[s.id] === 'absent').length;
+
+  return (
+    <div>
+      <div style={S.section('#10b981')}>
+        <span>📅</span>
+        <span style={{ fontWeight: 800, color: '#10b981' }}>Daily Attendance</span>
+      </div>
+
+      {/* Class selector (only if not assigned) */}
+      {!user.class_id && (
+        <div style={S.card}>
+          <label style={S.label}>Class</label>
+          <select style={S.input} value={selectedClass} onChange={e => setSelectedClass(e.target.value)}>
+            <option value="">Choose class</option>
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
+          </select>
+        </div>
+      )}
+
+      {!selectedClass && (
+        <div style={{ textAlign: 'center', color: '#94a3b8', padding: 40, fontSize: 14 }}>
+          Select a class to begin marking attendance.
+        </div>
+      )}
+
+      {selectedClass && (
+        <>
+          {/* Sub-view toggle */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            {[{ id: 'mark', label: '✏️ Mark Attendance' }, { id: 'summary', label: '📊 Summary' }].map(v => (
+              <button key={v.id} onClick={() => setSubView(v.id)}
+                style={{ ...S.btn(subView === v.id ? '#10b981' : '#e2e8f0'), color: subView === v.id ? '#fff' : '#475569', flex: 1, fontSize: 13 }}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── MARK ATTENDANCE ── */}
+          {subView === 'mark' && (
+            <>
+              <div style={S.card}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 0 }}>
+                  <div>
+                    <label style={S.label}>Class</label>
+                    <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 14, padding: '10px 0' }}>
+                      {cls ? `${cls.name} ${cls.arm}` : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <label style={S.label}>Date</label>
+                    <input type="date" style={S.input} value={selectedDate} max={today}
+                      onChange={e => setSelectedDate(e.target.value)} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary bar */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: 'Present', count: presentCount,  color: '#10b981', bg: '#f0fdf4' },
+                  { label: 'Late',    count: lateCount,     color: '#f59e0b', bg: '#fffbeb' },
+                  { label: 'Absent',  count: absentCount,   color: '#ef4444', bg: '#fef2f2' },
+                ].map(item => (
+                  <div key={item.label} style={{ background: item.bg, borderRadius: 12, padding: '12px 8px', textAlign: 'center', border: `1.5px solid ${item.color}22` }}>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: item.color }}>{item.count}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: item.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Quick mark all */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', alignSelf: 'center', flexShrink: 0 }}>Mark all:</span>
+                {Object.entries(statusConfig).map(([key, cfg]) => (
+                  <button key={key} onClick={() => markAll(key)}
+                    style={{ ...S.btn(cfg.color), fontSize: 12, padding: '6px 12px', flex: 1 }}>
+                    {cfg.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Student rows */}
+              {loading ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8', padding: 24 }}>Loading…</div>
+              ) : classStudents.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8', padding: 24, fontSize: 13 }}>No students in this class.</div>
+              ) : (
+                <div style={S.card}>
+                  {classStudents.map((student, i) => {
+                    const status = records[student.id] || 'absent';
+                    const cfg = statusConfig[status];
+                    return (
+                      <div key={student.id} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 0',
+                        borderBottom: i < classStudents.length - 1 ? '1px solid #f1f5f9' : 'none',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            width: 32, height: 32, borderRadius: '50%', background: cfg.bg,
+                            border: `2px solid ${cfg.color}`, display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', fontSize: 13, fontWeight: 800, color: cfg.color, flexShrink: 0,
+                          }}>
+                            {student.full_name.charAt(0).toUpperCase()}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, color: '#1e293b', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {student.full_name}
+                            </div>
+                            <div style={{ fontSize: 11, color: cfg.color, fontWeight: 600 }}>{cfg.label}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                          {Object.entries(statusConfig).map(([key, c]) => (
+                            <button key={key} onClick={() => setStatus(student.id, key)}
+                              style={{
+                                border: `2px solid ${status === key ? c.color : '#e2e8f0'}`,
+                                background: status === key ? c.bg : '#fff',
+                                color: status === key ? c.color : '#94a3b8',
+                                borderRadius: 8, padding: '5px 9px', fontSize: 11, fontWeight: 700,
+                                cursor: 'pointer', transition: 'all 0.15s',
+                              }}>
+                              {key === 'present' ? '✓' : key === 'late' ? '⏰' : '✗'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {saved && (
+                <div style={{ background: '#f0fdf4', border: '1.5px solid #10b981', borderRadius: 10, padding: '10px 16px', color: '#059669', fontWeight: 700, marginBottom: 12, textAlign: 'center' }}>
+                  ✅ Attendance saved for {selectedDate}
+                </div>
+              )}
+
+              <button onClick={saveAttendance} disabled={saving || classStudents.length === 0}
+                style={{ ...S.btn(saved ? '#94a3b8' : '#10b981'), width: '100%', padding: '13px', fontSize: 15, marginTop: 4 }}>
+                {saving ? 'Saving…' : saved ? '✅ Attendance Saved' : '💾 Save Attendance'}
+              </button>
+              {saved && (
+                <button onClick={() => setSaved(false)}
+                  style={{ ...S.btn('#f59e0b'), width: '100%', padding: '10px', fontSize: 13, marginTop: 8 }}>
+                  ✏️ Edit
+                </button>
+              )}
+            </>
+          )}
+
+          {/* ── SUMMARY VIEW ── */}
+          {subView === 'summary' && (
+            <div>
+              {summaryLoading ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8', padding: 40 }}>Loading…</div>
+              ) : !summaryData || summaryData.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#94a3b8', padding: 40, fontSize: 13 }}>No attendance records yet for this class.</div>
+              ) : (
+                <>
+                  {/* By-date table */}
+                  <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', fontWeight: 800, color: '#1e293b', borderBottom: '1px solid #f1f5f9', fontSize: 13 }}>
+                      📆 Attendance by Date
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc' }}>
+                            {['Date', 'Present', 'Late', 'Absent', 'Total'].map(h => (
+                              <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getSummaryByDate().map((row, i) => (
+                            <tr key={row.date} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                              <td style={{ padding: '8px 12px', fontWeight: 600, color: '#374151' }}>{row.date}</td>
+                              <td style={{ padding: '8px 12px', color: '#10b981', fontWeight: 700 }}>{row.present || 0}</td>
+                              <td style={{ padding: '8px 12px', color: '#f59e0b', fontWeight: 700 }}>{row.late || 0}</td>
+                              <td style={{ padding: '8px 12px', color: '#ef4444', fontWeight: 700 }}>{row.absent || 0}</td>
+                              <td style={{ padding: '8px 12px', color: '#64748b', fontWeight: 600 }}>{(row.present || 0) + (row.late || 0) + (row.absent || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Per-student summary */}
+                  <div style={{ ...S.card, padding: 0, overflow: 'hidden', marginTop: 16 }}>
+                    <div style={{ padding: '12px 16px', fontWeight: 800, color: '#1e293b', borderBottom: '1px solid #f1f5f9', fontSize: 13 }}>
+                      👨‍🎓 Per-Student Summary
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc' }}>
+                            {['Student', 'Present', 'Late', 'Absent', 'Attend. %'].map(h => (
+                              <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: 10 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getStudentSummary().map((row, i) => {
+                            const pct = row.total ? Math.round(((row.present + row.late) / row.total) * 100) : 0;
+                            const pctColor = pct >= 75 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+                            return (
+                              <tr key={row.student_id} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                <td style={{ padding: '8px 10px', fontWeight: 600, color: '#374151', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.student?.full_name}</td>
+                                <td style={{ padding: '8px 10px', color: '#10b981', fontWeight: 700 }}>{row.present}</td>
+                                <td style={{ padding: '8px 10px', color: '#f59e0b', fontWeight: 700 }}>{row.late}</td>
+                                <td style={{ padding: '8px 10px', color: '#ef4444', fontWeight: 700 }}>{row.absent}</td>
+                                <td style={{ padding: '8px 10px' }}>
+                                  <span style={{ background: pctColor + '18', color: pctColor, borderRadius: 20, padding: '2px 10px', fontWeight: 800, fontSize: 11 }}>{pct}%</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
   const [students,setStudents]=useState([]); const [classes,setClasses]=useState([]);
@@ -1833,6 +2193,7 @@ function TeacherDash({ user, onLogout }) {
   const [classes,setClasses]=useState([]); const [students,setStudents]=useState([]);
   const [terms,setTerms]=useState([]); const [school,setSchool]=useState(null);
   const [allStudentsInClass,setAllStudentsInClass]=useState([]);
+  const [allSchoolStudents,setAllSchoolStudents]=useState([]);
   const [selectedClass,setSelectedClass]=useState(""); const [selectedTerm,setSelectedTerm]=useState("");
   const [selectedStudent,setSelectedStudent]=useState(null); const [subjects,setSubjects]=useState([]);
   const [scores,setScores]=useState({}); const [attendance,setAttendance]=useState({days_present:"",total_days:""});
@@ -1860,6 +2221,8 @@ function TeacherDash({ user, onLogout }) {
     const curr=t.find(t=>t.is_current); if(curr) setSelectedTerm(curr.id);
     if(user.class_id){setClasses(c.filter(cls=>cls.id===user.class_id));setSelectedClass(user.class_id);}
     else setClasses(c);
+    // Load all students for this school (used by DailyAttendance)
+    db.get("students",{school_id:schoolId}).then(setAllSchoolStudents);
     if(schoolData?.logo_url){
       fetch(schoolData.logo_url).then(r=>r.blob()).then(blob=>new Promise(res=>{const reader=new FileReader();reader.onload=()=>res(reader.result);reader.readAsDataURL(blob);})).then(setLogoDataUrl).catch(()=>{});
     }
@@ -1947,8 +2310,9 @@ function TeacherDash({ user, onLogout }) {
   };
 
   const tabs=[
-    {id:"results", label:"Enter Results", icon:"📝", desc:"Score entry per student"},
-    {id:"report",  label:"View Reports",  icon:"📋", desc:"View & download report cards"},
+    {id:"results",    label:"Enter Results",    icon:"📝", desc:"Score entry per student"},
+    {id:"attendance", label:"Daily Attendance", icon:"📅", desc:"Mark & track daily attendance"},
+    {id:"report",     label:"View Reports",     icon:"📋", desc:"View & download report cards"},
   ];
 
   const TeacherResults = () => (
@@ -2019,6 +2383,7 @@ function TeacherDash({ user, onLogout }) {
   return(
     <SidebarLayout user={user} role="teacher" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       {tab==="results"&&<TeacherResults/>}
+      {tab==="attendance"&&<DailyAttendance user={user} classes={classes} terms={terms} students={allSchoolStudents}/>}
       {tab==="report"&&<ViewResults students={students} classes={classes.length?classes:[]} terms={terms} school={school} isPrincipal={false}/>}
     </SidebarLayout>
   );
