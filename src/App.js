@@ -4,6 +4,13 @@ import { useSyncEngine, retryFailed } from './syncEngine';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
+async function hashPassword(password) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+const isHashed = (pw) => typeof pw === 'string' && /^[a-f0-9]{64}$/.test(pw);
+
 function useDebounce(value, delay = 400) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -291,7 +298,10 @@ function Login({ onLogin, onRegister }) {
         setErr("User not found");setLoading(false);return;
       }
       if(!users[0].password){setErr("No password set for this account. Contact your administrator.");await recordLoginAttempt(email,false);setLoading(false);return;}
-      if(pass!==users[0].password){
+      const hashed = await hashPassword(pass);
+      const storedPw = users[0].password;
+      const match = isHashed(storedPw) ? hashed === storedPw : pass === storedPw;
+      if(!match){
         await recordLoginAttempt(email, false);
         const rl2 = await checkRateLimit(email);
         setErr(rl2.blocked
@@ -301,6 +311,10 @@ function Login({ onLogin, onRegister }) {
         setLoading(false);return;
       }
       await recordLoginAttempt(email, true);
+      if (!isHashed(storedPw)) {
+        const upgraded = await hashPassword(pass);
+        await supabase.from('users').update({ password: upgraded }).eq('id', users[0].id);
+      }
       await activateUserContext(users[0].id);
       const { password: _pw, ...safeUser } = users[0];
       onLogin(safeUser);
@@ -961,7 +975,8 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
       return alert(`⚠️ Teacher limit reached (${planInfo.config.teacherLimit}). Upgrade to Pro for unlimited teachers.`);
     }
     setSaving(true);
-    await db.post("users",{full_name:sanitize(form.full_name),email:sanitize(form.email),password:form.password,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
+    const hashedPw = await hashPassword(form.password);
+    await db.post("users",{full_name:sanitize(form.full_name),email:sanitize(form.email),password:hashedPw,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
     setForm({full_name:"",email:"",class_id:"",password:"",confirm:""});setAdding(false);setSaving(false);reload();
   };
   const updateClass=async(tid,cid)=>{ await db.patch("users",tid,{class_id:cid||null}); reload(); };
@@ -3035,7 +3050,8 @@ function Register({ onRegistered }) {
       if(existing.length){setErr("A school with this email already exists.");setLoading(false);return;}
       const newSchool=await db.post("schools",{name:school.name.trim(),address:school.address.trim(),phone:school.phone.trim(),email:school.email.trim()});
       if(!newSchool){setErr("Failed to create school. Check browser console for details.");setLoading(false);return;}
-      const newUser=await db.post("users",{full_name:admin.full_name.trim(),email:admin.email.trim().toLowerCase(),password:admin.password,role:"principal",school_id:newSchool.id});
+      const hashedAdminPw = await hashPassword(admin.password);
+      const newUser=await db.post("users",{full_name:admin.full_name.trim(),email:admin.email.trim().toLowerCase(),password:hashedAdminPw,role:"principal",school_id:newSchool.id});
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
       const { password: _pw2, ...safeNewUser } = newUser;
