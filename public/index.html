@@ -4,70 +4,106 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-    <!-- PWA core -->
     <meta name="theme-color" content="#1e3a8a" />
     <link rel="manifest" href="/manifest.json" />
 
-    <!-- iOS PWA support -->
+    <!-- iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="SchoolApp" />
+    <meta name="apple-mobile-web-app-title" content="AttendAI" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-startup-image" href="/icons/icon-512.png" />
 
-    <!-- Android / SEO -->
+    <!-- Android / general -->
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="application-name" content="SchoolApp" />
-    <meta name="description" content="Academic report management for Nigerian schools" />
-
-    <!-- Prevent phone-number detection -->
+    <meta name="application-name" content="AttendAI" />
+    <meta name="description" content="AI-powered attendance and school management for West African schools" />
     <meta name="format-detection" content="telephone=no" />
+    <meta name="msapplication-TileColor" content="#1e3a8a" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
 
-    <title>School Report System</title>
+    <link rel="icon" href="/icons/icon-96.png" />
+    <title>AttendAI</title>
 
     <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: 'Segoe UI', sans-serif; background: #eef2ff; -webkit-tap-highlight-color: transparent; }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: 'Inter', 'Segoe UI', sans-serif;
+        background: #eef2ff;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-font-smoothing: antialiased;
+      }
       #root { min-height: 100vh; }
 
-      /* Splash screen while React loads */
       #splash {
         position: fixed; inset: 0;
-        background: linear-gradient(135deg, #1e3a8a, #4338ca);
+        background: linear-gradient(145deg, #1e3a8a 0%, #312e81 60%, #4338ca 100%);
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
-        z-index: 9999; transition: opacity 0.4s ease;
+        z-index: 9999;
+        transition: opacity 0.5s ease;
       }
       #splash.hidden { opacity: 0; pointer-events: none; }
-      #splash-icon { font-size: 64px; margin-bottom: 16px; }
-      #splash-title { color: #fff; font-size: 22px; font-weight: 900; letter-spacing: 0.02em; }
-      #splash-sub { color: #c7d2fe; font-size: 13px; margin-top: 6px; }
-      #splash-dot {
-        width: 8px; height: 8px; border-radius: 50%;
-        background: #6366f1; margin-top: 32px;
-        animation: pulse 1.2s ease-in-out infinite;
+      #splash-icon { font-size: 72px; margin-bottom: 20px; animation: pop 0.4s ease; }
+      #splash-title { color: #fff; font-size: 26px; font-weight: 900; letter-spacing: 0.01em; }
+      #splash-sub { color: #a5b4fc; font-size: 13px; margin-top: 8px; font-weight: 500; }
+      #splash-bar-wrap { width: 120px; height: 3px; background: #ffffff20; border-radius: 99px; margin-top: 40px; overflow: hidden; }
+      #splash-bar { height: 100%; width: 0%; background: #818cf8; border-radius: 99px; animation: load 1.2s ease forwards; }
+
+      @keyframes pop {
+        0%   { transform: scale(0.6); opacity: 0; }
+        80%  { transform: scale(1.1); }
+        100% { transform: scale(1);   opacity: 1; }
       }
-      @keyframes pulse {
-        0%, 100% { transform: scale(1); opacity: 1; }
-        50% { transform: scale(1.6); opacity: 0.5; }
+      @keyframes load {
+        0%   { width: 0%; }
+        60%  { width: 70%; }
+        100% { width: 100%; }
+      }
+
+      #update-banner {
+        display: none;
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: #1e293b; color: #fff;
+        padding: 12px 20px; border-radius: 12px;
+        font-size: 13px; font-weight: 600;
+        box-shadow: 0 8px 24px #0006;
+        z-index: 9998; gap: 12px; align-items: center;
+        max-width: 320px; width: calc(100% - 32px);
+      }
+      #update-banner.show { display: flex; }
+      #update-btn {
+        background: #6366f1; border: none; color: #fff;
+        padding: 6px 14px; border-radius: 8px;
+        font-size: 12px; font-weight: 700; cursor: pointer;
+        white-space: nowrap;
       }
     </style>
   </head>
   <body>
-    <!-- Splash shown until React mounts -->
     <div id="splash">
       <div id="splash-icon">🎓</div>
-      <div id="splash-title">School Report System</div>
-      <div id="splash-sub">Loading your dashboard…</div>
-      <div id="splash-dot"></div>
+      <div id="splash-title">AttendAI</div>
+      <div id="splash-sub">School Management Platform</div>
+      <div id="splash-bar-wrap"><div id="splash-bar"></div></div>
+    </div>
+
+    <div id="update-banner">
+      <span>🔄 New version available</span>
+      <button id="update-btn" onclick="window.location.reload()">Update</button>
     </div>
 
     <div id="root"></div>
 
     <script>
-      // Hide splash once React renders
       window.__hideSplash = function() {
         const s = document.getElementById('splash');
-        if (s) { s.classList.add('hidden'); setTimeout(() => s.remove(), 500); }
+        if (s) { s.classList.add('hidden'); setTimeout(() => s.remove(), 600); }
+      };
+
+      window.__showUpdateBanner = function() {
+        const b = document.getElementById('update-banner');
+        if (b) b.classList.add('show');
       };
     </script>
   </body>
