@@ -651,7 +651,7 @@ function PromoteStudents({ students, classes, terms, reload }) {
 }
 
 // ── Manage Students ────────────────────────────────────────────
-function ManageStudents({ students, classes, reload, schoolId, school }) {
+function ManageStudents({ students, classes, reload, schoolId, school, planInfo, onUpgrade }) {
   const genAdmNumber = () => {
     const initials = school && school.name
       ? school.name.split(" ").filter(w=>w.length>1).map(w=>w[0].toUpperCase()).join("").slice(0,4)
@@ -673,6 +673,10 @@ function ManageStudents({ students, classes, reload, schoolId, school }) {
       if(!payload.admission_number.trim()) payload.admission_number=genAdmNumber();
       await db.patch("students",editId,payload);setEditId(null);
     } else {
+      if(planInfo && !planInfo.canAddStudent(students.length)){
+        setSaving(false);
+        return alert(`⚠️ Student limit reached (${planInfo.trialActive?30:planInfo.config.studentLimit}). Upgrade to Pro for unlimited students.`);
+      }
       const admNo=form.admission_number.trim()||genAdmNumber();
       await db.post("students",{...form,admission_number:admNo,school_id:schoolId});
     }
@@ -745,7 +749,7 @@ function ManageStudents({ students, classes, reload, schoolId, school }) {
 // Custom subjects override: key = class.id, value = string[]
 const customSubjectsStore = {};
 
-function ManageClasses({ classes, reload, schoolId, students, terms }) {
+function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, onUpgrade }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({name:"",arm:"",level:""});
   const [selectedClass,setSelectedClass]=useState(null);
   const [customSubjects,setCustomSubjects]=useState({}); // {classId:[...subjects]}
@@ -768,6 +772,9 @@ function ManageClasses({ classes, reload, schoolId, students, terms }) {
 
   const save=async()=>{
     if(!form.name){alert("Please select a class level");return;}
+    if(planInfo && !planInfo.canAddClass(classes.length)){
+      return alert(`⚠️ Class limit reached (${planInfo.config.classLimit}). Upgrade to Pro for unlimited classes.`);
+    }
     await db.post("classes",{...form,school_id:schoolId});
     setForm({name:"",arm:"",level:""});setAdding(false);reload();
   };
@@ -923,7 +930,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms }) {
 }
 
 // ── Manage Teachers (with class assignment) ────────────────────
-function ManageTeachers({ teachers, classes, reload, schoolId }) {
+function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgrade }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({full_name:"",email:"",class_id:"",password:"",confirm:""});
   const [saving,setSaving]=useState(false);
   const save=async()=>{
@@ -931,6 +938,9 @@ function ManageTeachers({ teachers, classes, reload, schoolId }) {
     if(!form.password.trim()){alert("Password is required");return;}
     if(form.password!==form.confirm){alert("Passwords do not match");return;}
     if(form.password.length<6){alert("Password must be at least 6 characters");return;}
+    if(planInfo && !planInfo.canAddTeacher(teachers.length)){
+      return alert(`⚠️ Teacher limit reached (${planInfo.config.teacherLimit}). Upgrade to Pro for unlimited teachers.`);
+    }
     setSaving(true);
     await db.post("users",{full_name:form.full_name,email:form.email,password:form.password,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
     setForm({full_name:"",email:"",class_id:"",password:"",confirm:""});setAdding(false);setSaving(false);reload();
@@ -2337,6 +2347,252 @@ function ReceiptInvoice({ students, classes, terms, school, user, logoDataUrl })
   );
 }
 
+// ── Plan Config ────────────────────────────────────────────────
+const PLANS = {
+  free: {
+    id:'free', name:'Free', color:'#64748b',
+    monthlyPrice:0, yearlyPrice:0,
+    studentLimit:10, teacherLimit:5, classLimit:5,
+    trialStudentLimit:30,
+    features:['Up to 30 students (trial)','Up to 5 classes','WhatsApp messaging','Basic report viewing'],
+    locked:['PDF report cards','Daily attendance','Receipt & Invoice','Priority support'],
+  },
+  pro: {
+    id:'pro', name:'Pro', color:'#6366f1',
+    monthlyPrice:10000, yearlyPrice:86000,
+    studentLimit:Infinity, teacherLimit:Infinity, classLimit:Infinity,
+    features:['Unlimited students','Unlimited classes','PDF report cards','Daily attendance','Receipt & Invoice','WhatsApp messaging','Priority support'],
+    locked:[],
+  },
+};
+
+function usePlan(school) {
+  const plan       = school?.plan || 'free';
+  const trialStart = school?.created_at ? new Date(school.created_at) : new Date();
+  const now        = new Date();
+  const trialDays  = Math.floor((now - trialStart) / (1000*60*60*24));
+  const trialActive= trialDays < 30;
+  const isPro      = plan === 'pro' && school?.plan_expires_at && new Date(school.plan_expires_at) > now;
+  const isFree     = !isPro;
+  const config     = PLANS[isPro ? 'pro' : 'free'];
+
+  const canAddStudent = (count) => {
+    if (isPro) return true;
+    if (trialActive) return count < PLANS.free.trialStudentLimit;
+    return count < config.studentLimit;
+  };
+  const canAddTeacher = (count) => isPro || count < config.teacherLimit;
+  const canAddClass   = (count) => isPro || count < config.classLimit;
+  const canUseFeature = (feature) => {
+    if (isPro) return true;
+    if (trialActive) return true;
+    return !['attendance','receipts','results_pdf'].includes(feature);
+  };
+
+  return { plan, isPro, isFree, trialActive, trialDays, config, canAddStudent, canAddTeacher, canAddClass, canUseFeature };
+}
+
+// ── Plan Warning Banner ────────────────────────────────────────
+function PlanBanner({ school, onUpgrade }) {
+  const { isPro, trialActive, trialDays, isFree } = usePlan(school);
+  const [dismissed, setDismissed] = useState(false);
+  if (isPro || dismissed) return null;
+
+  const daysLeft = 30 - trialDays;
+  const bg       = trialActive ? '#1e40af' : '#92400e';
+  const msg      = trialActive
+    ? `🎉 Free trial — ${daysLeft} day${daysLeft!==1?'s':''} left. Upgrade to keep full access.`
+    : '⚠️ Trial ended. Limited to 10 students, 5 teachers, 5 classes. Upgrade for full access.';
+
+  return (
+    <div style={{background:bg,color:'#fff',padding:'8px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:12,fontWeight:600,gap:8,flexWrap:'wrap'}}>
+      <span style={{flex:1}}>{msg}</span>
+      <div style={{display:'flex',gap:8,flexShrink:0}}>
+        <button onClick={onUpgrade} style={{background:'#fff',color:bg,border:'none',borderRadius:6,padding:'4px 12px',fontSize:11,fontWeight:800,cursor:'pointer'}}>
+          Upgrade
+        </button>
+        <button onClick={()=>setDismissed(true)} style={{background:'none',border:'none',color:'#ffffffaa',fontSize:14,cursor:'pointer',padding:'0 4px'}}>✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Feature Gate ───────────────────────────────────────────────
+function FeatureGate({ feature, school, onUpgrade, children }) {
+  const { canUseFeature } = usePlan(school);
+  if (canUseFeature(feature)) return children;
+  return (
+    <div style={{textAlign:'center',padding:'48px 24px',background:'#f8fafc',borderRadius:16,border:'2px dashed #e2e8f0'}}>
+      <div style={{fontSize:36,marginBottom:12}}>🔒</div>
+      <div style={{fontWeight:800,color:'#1e293b',fontSize:16,marginBottom:8}}>Pro Feature</div>
+      <div style={{color:'#64748b',fontSize:13,marginBottom:20}}>
+        {feature==='attendance'&&'Daily attendance tracking is available on the Pro plan.'}
+        {feature==='receipts'&&'Receipt & invoice generation is available on the Pro plan.'}
+        {feature==='results_pdf'&&'PDF report card generation is available on the Pro plan.'}
+      </div>
+      <button onClick={onUpgrade} style={{background:'#6366f1',color:'#fff',border:'none',borderRadius:10,padding:'12px 28px',fontWeight:800,fontSize:14,cursor:'pointer'}}>
+        Upgrade to Pro
+      </button>
+    </div>
+  );
+}
+
+// ── Paystack Billing Screen ────────────────────────────────────
+const PAYSTACK_PUBLIC_KEY = 'pk_test_cd8cb0d01ef347cf80b63672549d3f4b8f5c600b';
+
+function loadPaystack() {
+  return new Promise((resolve) => {
+    if (window.PaystackPop) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://js.paystack.co/v1/inline.js';
+    s.onload = resolve;
+    document.head.appendChild(s);
+  });
+}
+
+function BillingScreen({ school, user, onUpgradeSuccess }) {
+  const { isPro, trialActive, trialDays, plan, config } = usePlan(school);
+  const [billing, setBilling]   = useState('monthly');
+  const [loading, setLoading]   = useState(false);
+  const [success, setSuccess]   = useState(false);
+
+  const price     = billing === 'monthly' ? PLANS.pro.monthlyPrice : PLANS.pro.yearlyPrice;
+  const saving    = (PLANS.pro.monthlyPrice * 12) - PLANS.pro.yearlyPrice;
+  const expiresIn = billing === 'monthly' ? 30 : 365;
+
+  const handlePay = async () => {
+    setLoading(true);
+    await loadPaystack();
+    setLoading(false);
+    const handler = window.PaystackPop.setup({
+      key:       PAYSTACK_PUBLIC_KEY,
+      email:     user.email || school?.email,
+      amount:    price * 100,
+      currency:  'NGN',
+      ref:       `SRS-${school?.id?.slice(0,8)}-${Date.now()}`,
+      metadata: {
+        school_id:   school?.id,
+        school_name: school?.name,
+        plan:        'pro',
+        billing,
+      },
+      onSuccess: async (transaction) => {
+        const expiresAt = new Date(Date.now() + expiresIn * 24 * 60 * 60 * 1000).toISOString();
+        await supabase.from('schools').update({
+          plan: 'pro',
+          plan_expires_at: expiresAt,
+          paystack_ref: transaction.reference,
+        }).eq('id', school?.id);
+        setSuccess(true);
+        if (onUpgradeSuccess) onUpgradeSuccess();
+      },
+      onCancel: () => {},
+    });
+    handler.openIframe();
+  };
+
+  return (
+    <div>
+      <div style={{...S.section('#6366f1')}}><span>💎</span><span style={{fontWeight:800,color:'#6366f1'}}>Billing & Plans</span></div>
+
+      {/* Current plan status */}
+      <div style={{...S.card,background: isPro ? '#f0fdf4' : '#fefce8', border:`1.5px solid ${isPro?'#10b981':'#f59e0b'}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:15,color:'#1e293b'}}>
+              {isPro ? '✅ Pro Plan Active' : '🆓 Free Plan'}
+            </div>
+            <div style={{fontSize:12,color:'#64748b',marginTop:4}}>
+              {isPro
+                ? `Expires: ${new Date(school?.plan_expires_at).toLocaleDateString('en-NG')}`
+                : trialActive
+                ? `Trial: ${30 - trialDays} days remaining`
+                : 'Trial ended — limited access'}
+            </div>
+          </div>
+          <div style={{fontSize:28}}>{isPro ? '👑' : '🔓'}</div>
+        </div>
+      </div>
+
+      {success && (
+        <div style={{background:'#f0fdf4',border:'1.5px solid #10b981',borderRadius:12,padding:16,textAlign:'center',marginBottom:16}}>
+          <div style={{fontSize:32,marginBottom:8}}>🎉</div>
+          <div style={{fontWeight:800,color:'#059669',fontSize:15}}>Payment Successful!</div>
+          <div style={{fontSize:13,color:'#64748b',marginTop:4}}>Your school is now on Pro. All features unlocked.</div>
+        </div>
+      )}
+
+      {!isPro && (
+        <>
+          {/* Billing toggle */}
+          <div style={{display:'flex',background:'#f1f5f9',borderRadius:12,padding:4,marginBottom:16}}>
+            {[['monthly','Monthly'],['yearly','Yearly']].map(([val,label])=>(
+              <button key={val} onClick={()=>setBilling(val)}
+                style={{flex:1,padding:'10px',border:'none',borderRadius:10,fontWeight:700,fontSize:13,cursor:'pointer',
+                  background:billing===val?'#fff':'transparent',
+                  color:billing===val?'#6366f1':'#64748b',
+                  boxShadow:billing===val?'0 1px 4px #0002':'none',transition:'all 0.15s'}}>
+                {label}
+                {val==='yearly'&&<span style={{marginLeft:6,background:'#10b981',color:'#fff',borderRadius:20,padding:'1px 7px',fontSize:10,fontWeight:800}}>Save ₦{saving.toLocaleString('en-NG')}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Plan comparison */}
+          {[
+            {plan:PLANS.free, current:!isPro},
+            {plan:PLANS.pro,  current:isPro},
+          ].map(({plan:p, current})=>(
+            <div key={p.id} style={{...S.card,border:`2px solid ${current&&p.id==='pro'?p.color:p.id==='pro'?p.color+'44':'#e2e8f0'}`,marginBottom:12,background:p.id==='pro'?'#fafafa':'#fff'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+                <div>
+                  <div style={{fontWeight:800,fontSize:16,color:p.color}}>{p.name}</div>
+                  {p.id==='free'
+                    ? <div style={{fontSize:12,color:'#64748b',marginTop:2}}>Always free</div>
+                    : <div style={{marginTop:4}}>
+                        <span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{(billing==='monthly'?p.monthlyPrice:p.yearlyPrice).toLocaleString('en-NG')}</span>
+                        <span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':'year'}</span>
+                      </div>
+                  }
+                </div>
+                {p.id==='pro'&&<span style={{background:'#6366f1',color:'#fff',borderRadius:20,padding:'3px 12px',fontSize:11,fontWeight:800}}>RECOMMENDED</span>}
+              </div>
+              {p.features.map(f=>(
+                <div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#374151'}}>
+                  <span style={{color:'#10b981',fontWeight:800,flexShrink:0}}>✓</span>{f}
+                </div>
+              ))}
+              {p.locked.map(f=>(
+                <div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#94a3b8'}}>
+                  <span style={{flexShrink:0}}>✗</span>{f}
+                </div>
+              ))}
+            </div>
+          ))}
+
+          <button onClick={handlePay} disabled={loading}
+            style={{...S.btn('#6366f1'),width:'100%',padding:14,fontSize:15,marginTop:4}}>
+            {loading ? 'Loading...' : `💳 Pay ₦${price.toLocaleString('en-NG')} — Upgrade to Pro`}
+          </button>
+
+          <div style={{textAlign:'center',fontSize:11,color:'#94a3b8',marginTop:10}}>
+            🔒 Secured by Paystack · 256-bit SSL encryption
+          </div>
+        </>
+      )}
+
+      {isPro && (
+        <div style={{...S.card,textAlign:'center'}}>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>Need to renew or change your plan?</div>
+          <button onClick={handlePay} style={{...S.btn('#6366f1'),padding:'10px 24px',fontSize:13}}>
+            🔄 Renew / Extend Pro
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
   const [students,setStudents]=useState([]); const [classes,setClasses]=useState([]);
@@ -2372,18 +2628,24 @@ function PrincipalDash({ user, onLogout }) {
     {id:"results",  label:"Results",   icon:"📋", desc:"View & generate report cards"},
     {id:"receipts", label:"Receipts",  icon:"🧾", desc:"Issue payment receipts"},
     {id:"messages", label:"Messages",  icon:"📨", desc:"WhatsApp parent messages"},
+    {id:"billing",  label:"Billing",   icon:"💎", desc:"Plans & subscription"},
     {id:"settings", label:"Settings",  icon:"⚙️", desc:"School config & admin"},
   ];
 
+  const planInfo = usePlan(school);
+  const goToBilling = () => setTab('billing');
+
   return (
     <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
+      <PlanBanner school={school} onUpgrade={goToBilling}/>
       {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/>}
-      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={user.school_id} school={school}/>}
-      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms}/>}
-      {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
-      {tab==="results" &&<ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/>}
-      {tab==="receipts"&&<ReceiptInvoice students={students} classes={classes} terms={terms} school={school} user={user} logoDataUrl={logoDataUrl}/>}
+      {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={user.school_id} school={school} planInfo={planInfo} onUpgrade={goToBilling}/>}
+      {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms} planInfo={planInfo} onUpgrade={goToBilling}/>}
+      {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id} planInfo={planInfo} onUpgrade={goToBilling}/>}
+      {tab==="results" &&<FeatureGate feature="results_pdf" school={school} onUpgrade={goToBilling}><ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/></FeatureGate>}
+      {tab==="receipts"&&<FeatureGate feature="receipts" school={school} onUpgrade={goToBilling}><ReceiptInvoice students={students} classes={classes} terms={terms} school={school} user={user} logoDataUrl={logoDataUrl}/></FeatureGate>}
       {tab==="messages"&&<Messages students={students} classes={classes} school={school}/>}
+      {tab==="billing" &&<BillingScreen school={school} user={user} onUpgradeSuccess={loadAll}/>}
       {tab==="settings"&&<SchoolSettings school={school} sessions={sessions} terms={terms} students={students} classes={classes} reload={loadAll} schoolId={user.school_id}/>}
     </SidebarLayout>
   );
@@ -2650,7 +2912,7 @@ function TeacherDash({ user, onLogout }) {
   return(
     <SidebarLayout user={user} role="teacher" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       {tab==="results"&&<TeacherResults/>}
-      {tab==="attendance"&&<DailyAttendance user={user} classes={classes} terms={terms} students={allSchoolStudents}/>}
+      {tab==="attendance"&&<FeatureGate feature="attendance" school={school} onUpgrade={()=>{}}><DailyAttendance user={user} classes={classes} terms={terms} students={allSchoolStudents}/></FeatureGate>}
       {tab==="report"&&<ViewResults students={students} classes={classes.length?classes:[]} terms={terms} school={school} isPrincipal={false}/>}
     </SidebarLayout>
   );
