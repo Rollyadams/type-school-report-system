@@ -1511,26 +1511,6 @@ function Overview({ students, classes, teachers, terms, school, onNavigate }) {
   );
 }
 
-// ── Free Banner ───────────────────────────────────────────────
-function FreeBanner({ school }) {
-  const [vis, setVis] = useState(true);
-  if (!vis) return null;
-  if (school && school.is_paid) return null;
-  return (
-    <div style={{
-      position:"fixed", bottom:0, left:0, right:0, zIndex:500,
-      background:"linear-gradient(90deg,#ea580c,#f59e0b)",
-      padding:"10px 16px", display:"flex", alignItems:"center", justifyContent:"space-between",
-      boxShadow:"0 -4px 20px #00000030"
-    }}>
-      <div>
-        <div style={{color:"#fff",fontWeight:900,fontSize:13}}>🔓 Free Limited Version</div>
-        <div style={{color:"#fff9",fontSize:11,marginTop:1}}>Contact admin to unlock full access</div>
-      </div>
-      <button onClick={()=>setVis(false)} style={{background:"#ffffff25",border:"none",color:"#fff",borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:700}}>Dismiss</button>
-    </div>
-  );
-}
 
 // ── Notification Bell ─────────────────────────────────────────
 function NotificationBell({ schoolId }) {
@@ -1754,7 +1734,6 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
         </div>
       </div>
 
-      <FreeBanner school={school} />
       {/* ── Page Content ── */}
       <div style={{ padding:"16px 16px 80px", maxWidth:700, margin:"0 auto" }}>
         {loading ? (
@@ -2525,17 +2504,21 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
       {!isPro && (
         <>
           {/* Billing toggle */}
-          <div style={{display:'flex',background:'#f1f5f9',borderRadius:12,padding:4,marginBottom:16}}>
-            {[['monthly','Monthly'],['yearly','Yearly']].map(([val,label])=>(
-              <button key={val} onClick={()=>setBilling(val)}
-                style={{flex:1,padding:'10px',border:'none',borderRadius:10,fontWeight:700,fontSize:13,cursor:'pointer',
-                  background:billing===val?'#fff':'transparent',
-                  color:billing===val?'#6366f1':'#64748b',
-                  boxShadow:billing===val?'0 1px 4px #0002':'none',transition:'all 0.15s'}}>
-                {label}
-                {val==='yearly'&&<span style={{marginLeft:6,background:'#10b981',color:'#fff',borderRadius:20,padding:'1px 7px',fontSize:10,fontWeight:800}}>Save ₦{saving.toLocaleString('en-NG')}</span>}
-              </button>
-            ))}
+          <div style={{marginBottom:20}}>
+            <div style={{textAlign:'center',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Billing Period</div>
+            <div style={{display:'flex',background:'#e2e8f0',borderRadius:14,padding:4,gap:4}}>
+              {[['monthly','Monthly',null],['yearly','Yearly',`Save ₦${saving.toLocaleString('en-NG')}`]].map(([val,label,badge])=>(
+                <button key={val} onClick={()=>setBilling(val)}
+                  style={{flex:1,padding:'12px 8px',border:'none',borderRadius:10,fontWeight:800,fontSize:14,cursor:'pointer',
+                    background:billing===val?'#6366f1':'transparent',
+                    color:billing===val?'#fff':'#64748b',
+                    boxShadow:billing===val?'0 2px 8px #6366f140':'none',
+                    transition:'all 0.2s',position:'relative'}}>
+                  {label}
+                  {badge&&<div style={{background:billing==='yearly'?'#10b981':'#10b981',color:'#fff',borderRadius:20,padding:'2px 8px',fontSize:10,fontWeight:800,marginTop:3}}>{badge}</div>}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Plan comparison */}
