@@ -2,6 +2,17 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, supabase, activateUserContext } from './supabaseClient';
 import { useSyncEngine, retryFailed } from './syncEngine';
 
+const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
+
+function useDebounce(value, delay = 400) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
+
 const NIGERIAN_SUBJECTS = {
   "Primary 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Primary 2":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
@@ -291,7 +302,8 @@ function Login({ onLogin, onRegister }) {
       }
       await recordLoginAttempt(email, true);
       await activateUserContext(users[0].id);
-      onLogin(users[0]);
+      const { password: _pw, ...safeUser } = users[0];
+      onLogin(safeUser);
     }catch(e){setErr("Connection error. Try again.");}
     setLoading(false);
   };
@@ -662,6 +674,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
   };
   const [form,setForm]=useState({full_name:"",admission_number:"",gender:"",date_of_birth:"",guardian_name:"",guardian_phone:"",class_id:""});
   const [adding,setAdding]=useState(false); const [search,setSearch]=useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [saving,setSaving]=useState(false); const [editId,setEditId]=useState(null);
   const resetForm=()=>setForm({full_name:"",admission_number:"",gender:"",date_of_birth:"",guardian_name:"",guardian_phone:"",class_id:""});
   const save=async()=>{
@@ -677,8 +690,14 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
         setSaving(false);
         return alert(`⚠️ Student limit reached (${planInfo.trialActive?30:planInfo.config.studentLimit}). Upgrade to Pro for unlimited students.`);
       }
-      const admNo=form.admission_number.trim()||genAdmNumber();
-      await db.post("students",{...form,admission_number:admNo,school_id:schoolId});
+      const admNo = sanitize(form.admission_number.trim()) || genAdmNumber();
+      await db.post("students", {
+        ...form,
+        full_name: sanitize(form.full_name),
+        guardian_name: sanitize(form.guardian_name),
+        admission_number: admNo,
+        school_id: schoolId,
+      });
     }
     resetForm();setAdding(false);setSaving(false);reload();
   };
@@ -687,7 +706,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
     setEditId(s.id);setAdding(true);
   };
   const filtered=students
-    .filter(s=>s.full_name.toLowerCase().includes(search.toLowerCase()))
+    .filter(s=>s.full_name.toLowerCase().includes(debouncedSearch.toLowerCase()))
     .sort((a,b)=>{
       const clsA=classes.find(c=>c.id===a.class_id);
       const clsB=classes.find(c=>c.id===b.class_id);
@@ -942,7 +961,7 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
       return alert(`⚠️ Teacher limit reached (${planInfo.config.teacherLimit}). Upgrade to Pro for unlimited teachers.`);
     }
     setSaving(true);
-    await db.post("users",{full_name:form.full_name,email:form.email,password:form.password,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
+    await db.post("users",{full_name:sanitize(form.full_name),email:sanitize(form.email),password:form.password,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
     setForm({full_name:"",email:"",class_id:"",password:"",confirm:""});setAdding(false);setSaving(false);reload();
   };
   const updateClass=async(tid,cid)=>{ await db.patch("users",tid,{class_id:cid||null}); reload(); };
@@ -1581,6 +1600,85 @@ function NotificationBell({ schoolId }) {
 }
 
 // ── Sidebar Layout Shell ───────────────────────────────────────
+function InstallBanner() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [visible, setVisible]               = useState(false);
+  const [expanded, setExpanded]             = useState(false);
+  const [installed, setInstalled]           = useState(false);
+
+  useEffect(() => {
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    if (isStandalone) return;
+    const dismissed = sessionStorage.getItem('pwa_banner_dismissed');
+    if (dismissed) return;
+    const handler = (e) => { e.preventDefault(); setDeferredPrompt(e); setVisible(true); };
+    window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('appinstalled', () => setInstalled(true));
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') setInstalled(true);
+    setDeferredPrompt(null);
+    setVisible(false);
+  };
+
+  const handleDismiss = (e) => {
+    e.stopPropagation();
+    sessionStorage.setItem('pwa_banner_dismissed', '1');
+    setVisible(false);
+  };
+
+  if (!visible || installed) return null;
+
+  return (
+    <div style={{
+      position:'fixed', bottom:16, right:16, zIndex:9000,
+      display:'flex', flexDirection:'column', alignItems:'flex-end',
+      filter:'drop-shadow(0 4px 16px rgba(0,0,0,0.18))',
+    }}>
+      {expanded ? (
+        <div style={{
+          background:'#1e3a8a', borderRadius:16, padding:'16px',
+          width:220, color:'#fff',
+        }}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <span style={{fontSize:22}}>📲</span>
+              <span style={{fontWeight:800,fontSize:13}}>Install App</span>
+            </div>
+            <button onClick={handleDismiss} style={{background:'#ffffff25',border:'none',color:'#fff',borderRadius:6,width:24,height:24,cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
+          </div>
+          <div style={{fontSize:11,color:'#a5b4fc',marginBottom:12,lineHeight:1.5}}>
+            Install School Report System on your home screen for faster access and offline use.
+          </div>
+          <button onClick={handleInstall}
+            style={{background:'#6366f1',border:'none',color:'#fff',borderRadius:10,padding:'10px',width:'100%',fontWeight:800,fontSize:13,cursor:'pointer'}}>
+            Install Now
+          </button>
+          <button onClick={() => setExpanded(false)}
+            style={{background:'none',border:'none',color:'#a5b4fc',fontSize:11,width:'100%',marginTop:8,cursor:'pointer',padding:4}}>
+            Maybe later
+          </button>
+        </div>
+      ) : (
+        <div onClick={() => setExpanded(true)} style={{
+          background:'#1e3a8a', borderRadius:50, padding:'8px 14px',
+          display:'flex', alignItems:'center', gap:6, cursor:'pointer',
+          color:'#fff', fontSize:12, fontWeight:700,
+        }}>
+          <span style={{fontSize:18}}>📲</span>
+          <span>Install</span>
+          <button onClick={handleDismiss} style={{background:'#ffffff25',border:'none',color:'#fff',borderRadius:50,width:18,height:18,cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',justifyContent:'center',padding:0,marginLeft:2}}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SyncBanner() {
   const { online, pendingCount, failedCount, syncing, lastSync, flush } = useSyncEngine();
   const [dismissed, setDismissed] = useState(false);
@@ -1681,6 +1779,8 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
 
       {/* ── Sync Status Banner ── */}
       <SyncBanner />
+      {/* ── PWA Install Banner ── */}
+      <InstallBanner />
 
       {/* ── Overlay ── */}
       {open && <div onClick={() => setOpen(false)} style={{ position:"fixed", inset:0, background:"#00000065", zIndex:200, backdropFilter:"blur(2px)" }}/>}
@@ -2417,7 +2517,7 @@ function FeatureGate({ feature, school, onUpgrade, children }) {
 }
 
 // ── Paystack Billing Screen ────────────────────────────────────
-const PAYSTACK_PUBLIC_KEY = 'pk_test_cd8cb0d01ef347cf80b63672549d3f4b8f5c600b';
+const PAYSTACK_PUBLIC_KEY = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_cd8cb0d01ef347cf80b63672549d3f4b8f5c600b';
 
 function loadPaystack() {
   return new Promise((resolve) => {
@@ -2938,8 +3038,9 @@ function Register({ onRegistered }) {
       const newUser=await db.post("users",{full_name:admin.full_name.trim(),email:admin.email.trim().toLowerCase(),password:admin.password,role:"principal",school_id:newSchool.id});
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
-      localStorage.setItem("school_user",JSON.stringify(newUser));
-      onRegistered(newUser);
+      const { password: _pw2, ...safeNewUser } = newUser;
+      localStorage.setItem("school_user", JSON.stringify(safeNewUser));
+      onRegistered(safeNewUser);
     }catch(e){setErr("Registration failed. Check your connection and try again.");}
     setLoading(false);
   };
