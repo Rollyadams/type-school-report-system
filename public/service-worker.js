@@ -1,14 +1,12 @@
-const CACHE_VERSION  = 'v2';
-const SHELL_CACHE    = `attendai-shell-${CACHE_VERSION}`;
-const API_CACHE      = `attendai-api-${CACHE_VERSION}`;
-const CDN_CACHE      = `attendai-cdn-${CACHE_VERSION}`;
+const CACHE_VERSION  = 'v3';
+const SHELL_CACHE    = `school-shell-${CACHE_VERSION}`;
+const API_CACHE      = `school-api-${CACHE_VERSION}`;
+const CDN_CACHE      = `school-cdn-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
 ];
 
 self.addEventListener('install', event => {
