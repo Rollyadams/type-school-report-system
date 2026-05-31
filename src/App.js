@@ -2750,6 +2750,84 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
           plan: 'pro',
           plan_expires_at: expiresAt,
           paystack_ref: transaction.reference,
+        }).eq('id', school?.id);
+        setSuccess(true);
+        if (onUpgradeSuccess) onUpgradeSuccess();
+      },
+      onCancel: () => {},
+    });
+    handler.openIframe();
+  };
+
+  return (
+    <div>
+      <div style={{...S.section('#6366f1')}}><span>💎</span><span style={{fontWeight:800,color:'#6366f1'}}>Billing & Plans</span></div>
+      <div style={{...S.card,background: isPro ? '#f0fdf4' : '#fefce8', border:`1.5px solid ${isPro?'#10b981':'#f59e0b'}`}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:15,color:'#1e293b'}}>{isPro ? '✅ Pro Plan Active' : '🆓 Free Plan'}</div>
+            <div style={{fontSize:12,color:'#64748b',marginTop:4}}>
+              {isPro ? `Expires: ${new Date(school?.plan_expires_at).toLocaleDateString('en-NG')}` : trialActive ? `Trial: ${30 - trialDays} days remaining` : 'Trial ended — limited access'}
+            </div>
+          </div>
+          <div style={{fontSize:28}}>{isPro ? '👑' : '🔓'}</div>
+        </div>
+      </div>
+      {success && (
+        <div style={{background:'#f0fdf4',border:'1.5px solid #10b981',borderRadius:12,padding:16,textAlign:'center',marginBottom:16}}>
+          <div style={{fontSize:32,marginBottom:8}}>🎉</div>
+          <div style={{fontWeight:800,color:'#059669',fontSize:15}}>Payment Successful!</div>
+          <div style={{fontSize:13,color:'#64748b',marginTop:4}}>Your school is now on Pro. All features unlocked.</div>
+        </div>
+      )}
+      {!isPro && (
+        <>
+          <div style={{marginBottom:20}}>
+            <div style={{textAlign:'center',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Billing Period</div>
+            <div style={{display:'flex',background:'#e2e8f0',borderRadius:14,padding:4,gap:4}}>
+              {[['monthly','Monthly',null],['yearly','Yearly',`Save ₦${saving.toLocaleString('en-NG')}`]].map(([val,label,badge])=>(
+                <button key={val} onClick={()=>setBilling(val)}
+                  style={{flex:1,padding:'12px 8px',border:'none',borderRadius:10,fontWeight:800,fontSize:14,cursor:'pointer',
+                    background:billing===val?'#6366f1':'transparent',color:billing===val?'#fff':'#64748b',
+                    boxShadow:billing===val?'0 2px 8px #6366f140':'none',transition:'all 0.2s'}}>
+                  {label}
+                  {badge&&<div style={{background:'#10b981',color:'#fff',borderRadius:20,padding:'2px 8px',fontSize:10,fontWeight:800,marginTop:3}}>{badge}</div>}
+                </button>
+              ))}
+            </div>
+          </div>
+          {[{plan:PLANS.free,current:!isPro},{plan:PLANS.pro,current:isPro}].map(({plan:p,current})=>(
+            <div key={p.id} style={{...S.card,border:`2px solid ${current&&p.id==='pro'?p.color:p.id==='pro'?p.color+'44':'#e2e8f0'}`,marginBottom:12,background:p.id==='pro'?'#fafafa':'#fff'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+                <div>
+                  <div style={{fontWeight:800,fontSize:16,color:p.color}}>{p.name}</div>
+                  {p.id==='free'
+                    ? <div style={{fontSize:12,color:'#64748b',marginTop:2}}>Always free</div>
+                    : <div style={{marginTop:4}}><span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{(billing==='monthly'?p.monthlyPrice:p.yearlyPrice).toLocaleString('en-NG')}</span><span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':'year'}</span></div>
+                  }
+                </div>
+                {p.id==='pro'&&<span style={{background:'#6366f1',color:'#fff',borderRadius:20,padding:'3px 12px',fontSize:11,fontWeight:800}}>RECOMMENDED</span>}
+              </div>
+              {p.features.map(f=><div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#374151'}}><span style={{color:'#10b981',fontWeight:800,flexShrink:0}}>✓</span>{f}</div>)}
+              {p.locked.map(f=><div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#94a3b8'}}><span style={{flexShrink:0}}>✗</span>{f}</div>)}
+            </div>
+          ))}
+          <button onClick={handlePay} disabled={loading} style={{...S.btn('#6366f1'),width:'100%',padding:14,fontSize:15,marginTop:4}}>
+            {loading ? 'Loading...' : `💳 Pay ₦${price.toLocaleString('en-NG')} — Upgrade to Pro`}
+          </button>
+          <div style={{textAlign:'center',fontSize:11,color:'#94a3b8',marginTop:10}}>🔒 Secured by Paystack · 256-bit SSL encryption</div>
+        </>
+      )}
+      {isPro && (
+        <div style={{...S.card,textAlign:'center'}}>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>Need to renew or change your plan?</div>
+          <button onClick={handlePay} style={{...S.btn('#6366f1'),padding:'10px 24px',fontSize:13}}>🔄 Renew / Extend Pro</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Timetable Generator ────────────────────────────────────────
 const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
 
@@ -2954,120 +3032,6 @@ function Timetable({ user, classes, school, isPrincipal }) {
   );
 }
 
-        }).eq('id', school?.id);
-        setSuccess(true);
-        if (onUpgradeSuccess) onUpgradeSuccess();
-      },
-      onCancel: () => {},
-    });
-    handler.openIframe();
-  };
-
-  return (
-    <div>
-      <div style={{...S.section('#6366f1')}}><span>💎</span><span style={{fontWeight:800,color:'#6366f1'}}>Billing & Plans</span></div>
-
-      {/* Current plan status */}
-      <div style={{...S.card,background: isPro ? '#f0fdf4' : '#fefce8', border:`1.5px solid ${isPro?'#10b981':'#f59e0b'}`}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <div>
-            <div style={{fontWeight:800,fontSize:15,color:'#1e293b'}}>
-              {isPro ? '✅ Pro Plan Active' : '🆓 Free Plan'}
-            </div>
-            <div style={{fontSize:12,color:'#64748b',marginTop:4}}>
-              {isPro
-                ? `Expires: ${new Date(school?.plan_expires_at).toLocaleDateString('en-NG')}`
-                : trialActive
-                ? `Trial: ${30 - trialDays} days remaining`
-                : 'Trial ended — limited access'}
-            </div>
-          </div>
-          <div style={{fontSize:28}}>{isPro ? '👑' : '🔓'}</div>
-        </div>
-      </div>
-
-      {success && (
-        <div style={{background:'#f0fdf4',border:'1.5px solid #10b981',borderRadius:12,padding:16,textAlign:'center',marginBottom:16}}>
-          <div style={{fontSize:32,marginBottom:8}}>🎉</div>
-          <div style={{fontWeight:800,color:'#059669',fontSize:15}}>Payment Successful!</div>
-          <div style={{fontSize:13,color:'#64748b',marginTop:4}}>Your school is now on Pro. All features unlocked.</div>
-        </div>
-      )}
-
-      {!isPro && (
-        <>
-          {/* Billing toggle */}
-          <div style={{marginBottom:20}}>
-            <div style={{textAlign:'center',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Billing Period</div>
-            <div style={{display:'flex',background:'#e2e8f0',borderRadius:14,padding:4,gap:4}}>
-              {[['monthly','Monthly',null],['yearly','Yearly',`Save ₦${saving.toLocaleString('en-NG')}`]].map(([val,label,badge])=>(
-                <button key={val} onClick={()=>setBilling(val)}
-                  style={{flex:1,padding:'12px 8px',border:'none',borderRadius:10,fontWeight:800,fontSize:14,cursor:'pointer',
-                    background:billing===val?'#6366f1':'transparent',
-                    color:billing===val?'#fff':'#64748b',
-                    boxShadow:billing===val?'0 2px 8px #6366f140':'none',
-                    transition:'all 0.2s',position:'relative'}}>
-                  {label}
-                  {badge&&<div style={{background:billing==='yearly'?'#10b981':'#10b981',color:'#fff',borderRadius:20,padding:'2px 8px',fontSize:10,fontWeight:800,marginTop:3}}>{badge}</div>}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Plan comparison */}
-          {[
-            {plan:PLANS.free, current:!isPro},
-            {plan:PLANS.pro,  current:isPro},
-          ].map(({plan:p, current})=>(
-            <div key={p.id} style={{...S.card,border:`2px solid ${current&&p.id==='pro'?p.color:p.id==='pro'?p.color+'44':'#e2e8f0'}`,marginBottom:12,background:p.id==='pro'?'#fafafa':'#fff'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
-                <div>
-                  <div style={{fontWeight:800,fontSize:16,color:p.color}}>{p.name}</div>
-                  {p.id==='free'
-                    ? <div style={{fontSize:12,color:'#64748b',marginTop:2}}>Always free</div>
-                    : <div style={{marginTop:4}}>
-                        <span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{(billing==='monthly'?p.monthlyPrice:p.yearlyPrice).toLocaleString('en-NG')}</span>
-                        <span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':'year'}</span>
-                      </div>
-                  }
-                </div>
-                {p.id==='pro'&&<span style={{background:'#6366f1',color:'#fff',borderRadius:20,padding:'3px 12px',fontSize:11,fontWeight:800}}>RECOMMENDED</span>}
-              </div>
-              {p.features.map(f=>(
-                <div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#374151'}}>
-                  <span style={{color:'#10b981',fontWeight:800,flexShrink:0}}>✓</span>{f}
-                </div>
-              ))}
-              {p.locked.map(f=>(
-                <div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#94a3b8'}}>
-                  <span style={{flexShrink:0}}>✗</span>{f}
-                </div>
-              ))}
-            </div>
-          ))}
-
-          <button onClick={handlePay} disabled={loading}
-            style={{...S.btn('#6366f1'),width:'100%',padding:14,fontSize:15,marginTop:4}}>
-            {loading ? 'Loading...' : `💳 Pay ₦${price.toLocaleString('en-NG')} — Upgrade to Pro`}
-          </button>
-
-          <div style={{textAlign:'center',fontSize:11,color:'#94a3b8',marginTop:10}}>
-            🔒 Secured by Paystack · 256-bit SSL encryption
-          </div>
-        </>
-      )}
-
-      {isPro && (
-        <div style={{...S.card,textAlign:'center'}}>
-          <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>Need to renew or change your plan?</div>
-          <button onClick={handlePay} style={{...S.btn('#6366f1'),padding:'10px 24px',fontSize:13}}>
-            🔄 Renew / Extend Pro
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
