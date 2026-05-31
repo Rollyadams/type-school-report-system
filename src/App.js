@@ -2947,8 +2947,8 @@ function Timetable({ user, classes, school, isPrincipal }) {
                 <label style={S.label}>Period Name</label>
                 <input style={{...S.input,marginBottom:8}} placeholder="e.g. Period 1 or Assembly" value={newPeriod.label} onChange={e=>setNewPeriod(p=>({...p,label:e.target.value}))}/>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                  <div><label style={S.label}>Start Time</label><input type="time" style={S.input} value={newPeriod.start} onChange={e=>setNewPeriod(p=>({...p,start:e.target.value}))}/></div>
-                  <div><label style={S.label}>End Time</label><input type="time" style={S.input} value={newPeriod.end} onChange={e=>setNewPeriod(p=>({...p,end:e.target.value}))}/></div>
+                  <div><label style={S.label}>Start Time</label><input type="text" style={S.input} placeholder="e.g. 8:00 AM" value={newPeriod.start} onChange={e=>setNewPeriod(p=>({...p,start:e.target.value}))}/></div>
+                  <div><label style={S.label}>End Time</label><input type="text" style={S.input} placeholder="e.g. 8:40 AM" value={newPeriod.end} onChange={e=>setNewPeriod(p=>({...p,end:e.target.value}))}/></div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={addPeriod} style={{...S.btn("#0891b2"),flex:1,padding:10,fontSize:13}}>Add</button>
