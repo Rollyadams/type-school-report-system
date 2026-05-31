@@ -1649,7 +1649,7 @@ function Overview({ students, classes, teachers, terms, school, onNavigate }) {
     {label:"Total Students",value:students.length,icon:"👨‍🎓",col:"#6366f1",tab:"students",hint:"Manage students →"},
     {label:"Total Classes",value:classes.length,icon:"🏫",col:"#0ea5e9",tab:"classes",hint:"Manage classes →"},
     {label:"Total Teachers",value:teachers.length,icon:"👩‍🏫",col:"#10b981",tab:"teachers",hint:"Manage teachers →"},
-    {label:"Current Term",value:currentTerm?.name||"Not set",icon:"📅",col:"#f59e0b",tab:"sessions",hint:"View sessions →"},
+    {label:"Current Term",value:currentTerm?.name||"Not set",icon:"📅",col:"#f59e0b",tab:"settings",hint:"Manage sessions →"},
   ];
   return(
     <div>
@@ -3123,13 +3123,24 @@ function Analytics({ students, classes, teachers, terms, school }) {
     setLoading(true);
     Promise.all([
       supabase.from('daily_attendance').select('*').eq('school_id', school.id),
-      supabase.from('results').select('*').in('student_id', students.map(s => s.id)),
-      supabase.from('attendance').select('*').in('student_id', students.map(s => s.id)),
-    ]).then(([att, res, feeAtt]) => {
+      supabase.from('results').select('*').in('student_id', students.length ? students.map(s => s.id) : ['none']),
+      supabase.from('receipts').select('*').eq('school_id', school.id),
+    ]).then(([att, res, rec]) => {
       setAttData(att.data || []);
       setResults(res.data || []);
-      setReceipts(feeAtt.data || []);
+      setReceipts(rec.data || []);
       setLoading(false);
+    }).catch(() => {
+      // receipts table may not exist yet — fall back gracefully
+      Promise.all([
+        supabase.from('daily_attendance').select('*').eq('school_id', school.id),
+        supabase.from('results').select('*').in('student_id', students.length ? students.map(s => s.id) : ['none']),
+      ]).then(([att, res]) => {
+        setAttData(att.data || []);
+        setResults(res.data || []);
+        setReceipts([]);
+        setLoading(false);
+      });
     });
   }, [school?.id, students.length]);
 
@@ -3224,11 +3235,11 @@ function Analytics({ students, classes, teachers, terms, school }) {
     <div>
       <div style={S.section('#0891b2')}><span>📊</span><span style={{fontWeight:800,color:'#0891b2'}}>Analytics</span></div>
 
-      {/* Tab bar */}
-      <div style={{display:'flex',gap:6,marginBottom:16,overflowX:'auto',paddingBottom:4}}>
+      {/* Tab bar — 2x2 grid fits all screens */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:16}}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
-            style={{flexShrink:0,padding:'8px 14px',border:'none',borderRadius:20,fontWeight:700,fontSize:12,cursor:'pointer',
+            style={{padding:'10px 8px',border:'none',borderRadius:12,fontWeight:700,fontSize:13,cursor:'pointer',
               background: activeTab===t.id?'#0891b2':'#f1f5f9',
               color: activeTab===t.id?'#fff':'#64748b',
               transition:'all 0.15s'}}>
@@ -3240,6 +3251,11 @@ function Analytics({ students, classes, teachers, terms, school }) {
       {/* ── Attendance Tab */}
       {activeTab === 'attendance' && (
         <div>
+          {attData.length < 10 && (
+            <div style={{background:'#fffbeb',border:'1.5px solid #fbbf24',borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:12,color:'#92400e',fontWeight:600}}>
+              📊 Analytics improve as more attendance is recorded. Mark daily attendance to see meaningful trends.
+            </div>
+          )}
           {attByClass.length === 0 ? (
             <div style={{textAlign:'center',color:'#94a3b8',padding:40,fontSize:13}}>No attendance data yet.</div>
           ) : (
@@ -3285,6 +3301,11 @@ function Analytics({ students, classes, teachers, terms, school }) {
       {/* ── Academic Tab */}
       {activeTab === 'academic' && (
         <div>
+          {results.length < 10 && (
+            <div style={{background:'#fffbeb',border:'1.5px solid #fbbf24',borderRadius:10,padding:'10px 14px',marginBottom:14,fontSize:12,color:'#92400e',fontWeight:600}}>
+              📊 Academic analytics improve as more results are entered. Add scores for more students to see subject trends.
+            </div>
+          )}
           {subjectAvgs.length === 0 ? (
             <div style={{textAlign:'center',color:'#94a3b8',padding:40,fontSize:13}}>No results data yet.</div>
           ) : (
@@ -3874,8 +3895,8 @@ export default function App() {
   const timerRef=useRef(null);
   const warnRef=useRef(null);
 
-  const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); };
-  const handleRegistered=(u)=>{ if(u){ setUser(u); } else { setScreen("login"); } };
+  const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); setScreen("app"); };
+  const handleRegistered=(u)=>{ if(u){ setUser(u); setScreen("app"); } else { setScreen("login"); } };
 
   const handleLogout=useCallback(()=>{
     localStorage.removeItem("school_user");
