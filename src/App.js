@@ -2745,14 +2745,18 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
         billing,
       },
       onSuccess: async (transaction) => {
-        const expiresAt = new Date(Date.now() + expiresIn * 24 * 60 * 60 * 1000).toISOString();
-        await supabase.from('schools').update({
-          plan: 'pro',
-          plan_expires_at: expiresAt,
-          paystack_ref: transaction.reference,
-        }).eq('id', school?.id);
-        setSuccess(true);
-        if (onUpgradeSuccess) onUpgradeSuccess();
+        // Webhook handles the DB update server-side.
+        // Poll for up to 30 seconds until plan is confirmed.
+        let attempts = 0;
+        const poll = setInterval(async () => {
+          attempts++;
+          const { data } = await supabase.from("schools").select("plan,plan_expires_at").eq("id", school?.id).single();
+          if (data?.plan === "pro" || attempts >= 6) {
+            clearInterval(poll);
+            setSuccess(true);
+            if (onUpgradeSuccess) onUpgradeSuccess();
+          }
+        }, 5000);
       },
       onCancel: () => {},
     });
@@ -3033,6 +3037,405 @@ function Timetable({ user, classes, school, isPrincipal }) {
 }
 
 
+// ── Onboarding Flow ───────────────────────────────────────────
+function OnboardingFlow({ school, user, classes, terms, teachers, students, reload, onComplete }) {
+  const steps = [
+    { id:'school',   icon:'🏫', title:'School Profile',    desc:'Add your school address and contact details' },
+    { id:'session',  icon:'📅', title:'Academic Session',  desc:'Set your current academic session and term' },
+    { id:'classes',  icon:'🎓', title:'Create Classes',    desc:'Add your class arms e.g. JSS 1A, JSS 1B' },
+    { id:'teachers', icon:'👩‍🏫', title:'Add Teachers',     desc:'Create teacher accounts and assign classes' },
+    { id:'students', icon:'👨‍🎓', title:'Add Students',     desc:'Start adding students to your classes' },
+  ];
+
+  const completed = {
+    school:   !!(school?.address && school?.phone),
+    session:  terms.length > 0,
+    classes:  classes.length > 0,
+    teachers: teachers.length > 0,
+    students: students.length > 0,
+  };
+
+  const totalDone  = Object.values(completed).filter(Boolean).length;
+  const percentage = Math.round((totalDone / steps.length) * 100);
+  const allDone    = totalDone === steps.length;
+
+  if (allDone) return null;
+
+  return (
+    <div style={{ ...S.card, border:'2px solid #6366f1', background:'#fafafa', marginBottom:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+        <div>
+          <div style={{ fontWeight:900, color:'#1e293b', fontSize:15 }}>🚀 Setup Your School</div>
+          <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>{totalDone} of {steps.length} steps complete</div>
+        </div>
+        <div style={{ textAlign:'center' }}>
+          <div style={{ fontSize:20, fontWeight:900, color:'#6366f1' }}>{percentage}%</div>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div style={{ background:'#e2e8f0', borderRadius:99, height:6, marginBottom:16, overflow:'hidden' }}>
+        <div style={{ background:'linear-gradient(90deg,#6366f1,#10b981)', height:'100%', width:`${percentage}%`, borderRadius:99, transition:'width 0.4s ease' }}/>
+      </div>
+
+      {steps.map((step, i) => {
+        const done = completed[step.id];
+        return (
+          <div key={step.id} onClick={() => !done && onComplete(step.id)}
+            style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0',
+              borderBottom: i < steps.length-1 ? '1px solid #f1f5f9' : 'none',
+              cursor: done ? 'default' : 'pointer', opacity: done ? 0.7 : 1 }}>
+            <div style={{ width:36, height:36, borderRadius:'50%', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center',
+              background: done ? '#f0fdf4' : '#f8fafc',
+              border: `2px solid ${done ? '#10b981' : '#e2e8f0'}` }}>
+              {done ? <span style={{ color:'#10b981', fontWeight:900, fontSize:16 }}>✓</span> : <span style={{ fontSize:18 }}>{step.icon}</span>}
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontWeight:700, color: done ? '#64748b' : '#1e293b', fontSize:13, textDecoration: done ? 'line-through' : 'none' }}>{step.title}</div>
+              <div style={{ fontSize:11, color:'#94a3b8' }}>{step.desc}</div>
+            </div>
+            {!done && <span style={{ color:'#6366f1', fontSize:18, flexShrink:0 }}>›</span>}
+          </div>
+        );
+      })}
+
+      {totalDone >= 3 && !allDone && (
+        <div style={{ background:'#eff6ff', borderRadius:10, padding:'10px 14px', marginTop:12, fontSize:12, color:'#1e40af', fontWeight:600, textAlign:'center' }}>
+          🎉 Almost there! Complete the remaining steps to unlock full functionality.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Analytics Dashboard ───────────────────────────────────────
+function Analytics({ students, classes, teachers, terms, school }) {
+  const [attData,  setAttData]  = useState([]);
+  const [results,  setResults]  = useState([]);
+  const [receipts, setReceipts] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [activeTab, setActiveTab] = useState('attendance');
+
+  const currentTerm = terms.find(t => t.is_current) || terms[0];
+
+  useEffect(() => {
+    if (!school?.id) return;
+    setLoading(true);
+    Promise.all([
+      supabase.from('daily_attendance').select('*').eq('school_id', school.id),
+      supabase.from('results').select('*').in('student_id', students.map(s => s.id)),
+      supabase.from('attendance').select('*').in('student_id', students.map(s => s.id)),
+    ]).then(([att, res, feeAtt]) => {
+      setAttData(att.data || []);
+      setResults(res.data || []);
+      setReceipts(feeAtt.data || []);
+      setLoading(false);
+    });
+  }, [school?.id, students.length]);
+
+  // ── Attendance analytics
+  const attByClass = classes.map(cls => {
+    const clsStudents = students.filter(s => s.class_id === cls.id);
+    const clsRecords  = attData.filter(r => r.class_id === cls.id);
+    const total   = clsRecords.length;
+    const present = clsRecords.filter(r => r.status === 'present' || r.status === 'late').length;
+    const rate    = total > 0 ? Math.round((present / total) * 100) : null;
+    return { name:`${cls.name} ${cls.arm||''}`, rate, total, students: clsStudents.length };
+  }).filter(c => c.total > 0).sort((a,b) => (a.rate||0) - (b.rate||0));
+
+  const lowAttStudents = students.map(s => {
+    const recs    = attData.filter(r => r.student_id === s.id);
+    const total   = recs.length;
+    const present = recs.filter(r => r.status === 'present' || r.status === 'late').length;
+    const rate    = total > 0 ? Math.round((present / total) * 100) : null;
+    const cls     = classes.find(c => c.id === s.class_id);
+    return { ...s, attRate: rate, total, clsName: cls ? `${cls.name} ${cls.arm||''}` : '—' };
+  }).filter(s => s.attRate !== null && s.attRate < 75).sort((a,b) => a.attRate - b.attRate).slice(0,10);
+
+  // ── Academic analytics
+  const subjectAvgs = (() => {
+    const bySubject = {};
+    results.forEach(r => {
+      if (!r.subject_name) return;
+      if (!bySubject[r.subject_name]) bySubject[r.subject_name] = { scores:[], name:r.subject_name };
+      const total = (Number(r.ca_score)||0) + (Number(r.exam_score)||0);
+      if (total > 0) bySubject[r.subject_name].scores.push(total);
+    });
+    return Object.values(bySubject).map(s => ({
+      name: s.name,
+      avg:  s.scores.length ? Math.round(s.scores.reduce((a,b)=>a+b,0)/s.scores.length) : 0,
+      count: s.scores.length,
+    })).sort((a,b) => b.avg - a.avg).slice(0,8);
+  })();
+
+  const topStudents = (() => {
+    const byStudent = {};
+    results.forEach(r => {
+      if (!byStudent[r.student_id]) byStudent[r.student_id] = { id:r.student_id, scores:[] };
+      const total = (Number(r.ca_score)||0) + (Number(r.exam_score)||0);
+      if (total > 0) byStudent[r.student_id].scores.push(total);
+    });
+    return Object.values(byStudent).map(s => {
+      const student = students.find(st => st.id === s.id);
+      const cls     = classes.find(c => c.id === student?.class_id);
+      const avg     = s.scores.length ? Math.round(s.scores.reduce((a,b)=>a+b,0)/s.scores.length) : 0;
+      return { ...student, avg, clsName: cls ? `${cls.name} ${cls.arm||''}` : '—' };
+    }).filter(s => s.avg > 0).sort((a,b) => b.avg - a.avg).slice(0,5);
+  })();
+
+  // ── Enrollment analytics
+  const enrollByClass = classes.map(cls => ({
+    name:  `${cls.name} ${cls.arm||''}`,
+    count: students.filter(s => s.class_id === cls.id).length,
+  })).sort((a,b) => b.count - a.count);
+
+  const enrollByMonth = (() => {
+    const byMonth = {};
+    students.forEach(s => {
+      if (!s.created_at) return;
+      const month = s.created_at.slice(0,7);
+      byMonth[month] = (byMonth[month] || 0) + 1;
+    });
+    return Object.entries(byMonth).sort((a,b)=>a[0].localeCompare(b[0])).slice(-6).map(([month,count])=>({
+      month: new Date(month+'-01').toLocaleDateString('en-NG',{month:'short',year:'2-digit'}), count
+    }));
+  })();
+
+  // ── Fee analytics
+  const termAttendance = receipts.filter(r => currentTerm && r.term_id === currentTerm.id);
+  const paidStudentIds = [...new Set(termAttendance.map(r => r.student_id))];
+  const unpaidStudents = students.filter(s => !paidStudentIds.includes(s.id));
+
+  const barColor = (val, max) => {
+    const pct = max > 0 ? val/max : 0;
+    return pct >= 0.75 ? '#10b981' : pct >= 0.5 ? '#f59e0b' : '#ef4444';
+  };
+
+  const tabs = [
+    { id:'attendance', label:'📅 Attendance' },
+    { id:'academic',   label:'📚 Academic' },
+    { id:'enrollment', label:'👨‍🎓 Enrollment' },
+    { id:'fees',       label:'💰 Fees' },
+  ];
+
+  if (loading) return <div style={{textAlign:'center',padding:60,color:'#94a3b8'}}>Loading analytics…</div>;
+
+  return (
+    <div>
+      <div style={S.section('#0891b2')}><span>📊</span><span style={{fontWeight:800,color:'#0891b2'}}>Analytics</span></div>
+
+      {/* Tab bar */}
+      <div style={{display:'flex',gap:6,marginBottom:16,overflowX:'auto',paddingBottom:4}}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            style={{flexShrink:0,padding:'8px 14px',border:'none',borderRadius:20,fontWeight:700,fontSize:12,cursor:'pointer',
+              background: activeTab===t.id?'#0891b2':'#f1f5f9',
+              color: activeTab===t.id?'#fff':'#64748b',
+              transition:'all 0.15s'}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Attendance Tab */}
+      {activeTab === 'attendance' && (
+        <div>
+          {attByClass.length === 0 ? (
+            <div style={{textAlign:'center',color:'#94a3b8',padding:40,fontSize:13}}>No attendance data yet.</div>
+          ) : (
+            <>
+              <div style={{...S.card,padding:0,overflow:'hidden',marginBottom:16}}>
+                <div style={{padding:'12px 16px',fontWeight:800,color:'#1e293b',borderBottom:'1px solid #f1f5f9',fontSize:13}}>Attendance Rate by Class</div>
+                <div style={{padding:'12px 16px'}}>
+                  {attByClass.map((cls,i) => (
+                    <div key={i} style={{marginBottom:12}}>
+                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                        <span style={{fontSize:12,fontWeight:700,color:'#374151'}}>{cls.name}</span>
+                        <span style={{fontSize:12,fontWeight:900,color:barColor(cls.rate,100)}}>{cls.rate}%</span>
+                      </div>
+                      <div style={{background:'#f1f5f9',borderRadius:99,height:8,overflow:'hidden'}}>
+                        <div style={{height:'100%',width:`${cls.rate}%`,background:barColor(cls.rate,100),borderRadius:99,transition:'width 0.4s'}}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {lowAttStudents.length > 0 && (
+                <div style={{...S.card,padding:0,overflow:'hidden'}}>
+                  <div style={{padding:'12px 16px',fontWeight:800,color:'#ef4444',borderBottom:'1px solid #f1f5f9',fontSize:13}}>
+                    ⚠️ Low Attendance Students (below 75%)
+                  </div>
+                  {lowAttStudents.map((s,i) => (
+                    <div key={s.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 16px',borderBottom:i<lowAttStudents.length-1?'1px solid #f1f5f9':'none'}}>
+                      <div>
+                        <div style={{fontWeight:700,color:'#1e293b',fontSize:13}}>{s.full_name}</div>
+                        <div style={{fontSize:11,color:'#64748b'}}>{s.clsName}</div>
+                      </div>
+                      <span style={{background:'#fef2f2',color:'#ef4444',borderRadius:20,padding:'3px 12px',fontWeight:800,fontSize:12}}>{s.attRate}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Academic Tab */}
+      {activeTab === 'academic' && (
+        <div>
+          {subjectAvgs.length === 0 ? (
+            <div style={{textAlign:'center',color:'#94a3b8',padding:40,fontSize:13}}>No results data yet.</div>
+          ) : (
+            <>
+              <div style={{...S.card,padding:0,overflow:'hidden',marginBottom:16}}>
+                <div style={{padding:'12px 16px',fontWeight:800,color:'#1e293b',borderBottom:'1px solid #f1f5f9',fontSize:13}}>Average Score by Subject</div>
+                <div style={{padding:'12px 16px'}}>
+                  {subjectAvgs.map((sub,i) => {
+                    const max = subjectAvgs[0]?.avg || 100;
+                    return (
+                      <div key={i} style={{marginBottom:12}}>
+                        <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                          <span style={{fontSize:12,fontWeight:700,color:'#374151',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{sub.name}</span>
+                          <span style={{fontSize:12,fontWeight:900,color:barColor(sub.avg,100)}}>{sub.avg}/100</span>
+                        </div>
+                        <div style={{background:'#f1f5f9',borderRadius:99,height:8,overflow:'hidden'}}>
+                          <div style={{height:'100%',width:`${sub.avg}%`,background:barColor(sub.avg,100),borderRadius:99}}/>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {topStudents.length > 0 && (
+                <div style={{...S.card,padding:0,overflow:'hidden'}}>
+                  <div style={{padding:'12px 16px',fontWeight:800,color:'#1e293b',borderBottom:'1px solid #f1f5f9',fontSize:13}}>🏆 Top 5 Students</div>
+                  {topStudents.map((s,i) => (
+                    <div key={s.id} style={{display:'flex',alignItems:'center',gap:12,padding:'10px 16px',borderBottom:i<topStudents.length-1?'1px solid #f1f5f9':'none'}}>
+                      <div style={{width:28,height:28,borderRadius:'50%',background:i===0?'#fef9c3':i===1?'#f1f5f9':i===2?'#fef3c7':'#f8fafc',
+                        display:'flex',alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:13,color:i===0?'#ca8a04':'#64748b',flexShrink:0}}>
+                        {i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,color:'#1e293b',fontSize:13}}>{s.full_name}</div>
+                        <div style={{fontSize:11,color:'#64748b'}}>{s.clsName}</div>
+                      </div>
+                      <span style={{background:'#f0fdf4',color:'#10b981',borderRadius:20,padding:'3px 12px',fontWeight:800,fontSize:12}}>{s.avg}%</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Enrollment Tab */}
+      {activeTab === 'enrollment' && (
+        <div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>
+            {[
+              {label:'Total Students',value:students.length,color:'#6366f1'},
+              {label:'Total Classes', value:classes.length, color:'#0ea5e9'},
+              {label:'Total Teachers',value:teachers.length,color:'#10b981'},
+            ].map(item=>(
+              <div key={item.label} style={{background:`${item.color}10`,border:`1.5px solid ${item.color}30`,borderRadius:12,padding:'12px 8px',textAlign:'center'}}>
+                <div style={{fontSize:22,fontWeight:900,color:item.color}}>{item.value}</div>
+                <div style={{fontSize:10,color:'#64748b',fontWeight:700,marginTop:2}}>{item.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{...S.card,padding:0,overflow:'hidden',marginBottom:16}}>
+            <div style={{padding:'12px 16px',fontWeight:800,color:'#1e293b',borderBottom:'1px solid #f1f5f9',fontSize:13}}>Students per Class</div>
+            <div style={{padding:'12px 16px'}}>
+              {enrollByClass.filter(c=>c.count>0).map((cls,i)=>{
+                const max = enrollByClass[0]?.count||1;
+                return(
+                  <div key={i} style={{marginBottom:12}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                      <span style={{fontSize:12,fontWeight:700,color:'#374151'}}>{cls.name}</span>
+                      <span style={{fontSize:12,fontWeight:900,color:'#6366f1'}}>{cls.count}</span>
+                    </div>
+                    <div style={{background:'#f1f5f9',borderRadius:99,height:8,overflow:'hidden'}}>
+                      <div style={{height:'100%',width:`${(cls.count/max)*100}%`,background:'#6366f1',borderRadius:99}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {enrollByMonth.length > 0 && (
+            <div style={{...S.card,padding:0,overflow:'hidden'}}>
+              <div style={{padding:'12px 16px',fontWeight:800,color:'#1e293b',borderBottom:'1px solid #f1f5f9',fontSize:13}}>Monthly Enrollments (Last 6 months)</div>
+              <div style={{padding:'12px 16px',display:'flex',alignItems:'flex-end',gap:8,height:120}}>
+                {enrollByMonth.map((m,i)=>{
+                  const max = Math.max(...enrollByMonth.map(x=>x.count),1);
+                  const h   = Math.max(8, Math.round((m.count/max)*80));
+                  return(
+                    <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                      <span style={{fontSize:10,fontWeight:800,color:'#6366f1'}}>{m.count}</span>
+                      <div style={{width:'100%',height:h,background:'#6366f1',borderRadius:'4px 4px 0 0',minHeight:8}}/>
+                      <span style={{fontSize:9,color:'#64748b',fontWeight:600,textAlign:'center'}}>{m.month}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Fees Tab */}
+      {activeTab === 'fees' && (
+        <div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+            {[
+              {label:'Paid This Term',   value:paidStudentIds.length, color:'#10b981', bg:'#f0fdf4'},
+              {label:'Unpaid This Term', value:unpaidStudents.length, color:'#ef4444', bg:'#fef2f2'},
+            ].map(item=>(
+              <div key={item.label} style={{background:item.bg,border:`1.5px solid ${item.color}30`,borderRadius:12,padding:'16px 12px',textAlign:'center'}}>
+                <div style={{fontSize:28,fontWeight:900,color:item.color}}>{item.value}</div>
+                <div style={{fontSize:11,color:item.color,fontWeight:700,marginTop:2}}>{item.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {unpaidStudents.length > 0 && (
+            <div style={{...S.card,padding:0,overflow:'hidden'}}>
+              <div style={{padding:'12px 16px',fontWeight:800,color:'#ef4444',borderBottom:'1px solid #f1f5f9',fontSize:13}}>
+                ⚠️ Students with No Fee Record This Term
+              </div>
+              {unpaidStudents.slice(0,20).map((s,i)=>{
+                const cls=classes.find(c=>c.id===s.class_id);
+                return(
+                  <div key={s.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 16px',borderBottom:i<Math.min(unpaidStudents.length,20)-1?'1px solid #f1f5f9':'none'}}>
+                    <div>
+                      <div style={{fontWeight:700,color:'#1e293b',fontSize:13}}>{s.full_name}</div>
+                      <div style={{fontSize:11,color:'#64748b'}}>{cls?`${cls.name} ${cls.arm||''}`:'—'}</div>
+                    </div>
+                    <span style={{background:'#fef2f2',color:'#ef4444',borderRadius:20,padding:'3px 12px',fontWeight:800,fontSize:11}}>Unpaid</span>
+                  </div>
+                );
+              })}
+              {unpaidStudents.length > 20 && (
+                <div style={{padding:'10px 16px',textAlign:'center',fontSize:12,color:'#94a3b8'}}>+{unpaidStudents.length-20} more</div>
+              )}
+            </div>
+          )}
+
+          {paidStudentIds.length === 0 && unpaidStudents.length === 0 && (
+            <div style={{textAlign:'center',color:'#94a3b8',padding:40,fontSize:13}}>No fee records for current term yet.</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PrincipalDash({ user, onLogout }) {
   const [tab,setTab]=useState("overview");
   const [students,setStudents]=useState([]); const [classes,setClasses]=useState([]);
@@ -3061,7 +3464,8 @@ function PrincipalDash({ user, onLogout }) {
   };
 
   const tabs=[
-    {id:"overview", label:"Overview",  icon:"📊", desc:"School summary & stats"},
+    {id:"overview",  label:"Overview",  icon:"📊", desc:"School summary & stats"},
+    {id:"analytics", label:"Analytics", icon:"📈", desc:"Attendance, academic & fee insights"},
     {id:"students", label:"Students",  icon:"👨‍🎓", desc:"Add & manage students"},
     {id:"classes",  label:"Classes",   icon:"🏫", desc:"Manage class arms"},
     {id:"teachers", label:"Teachers",  icon:"👩‍🏫", desc:"Staff & class assignment"},
@@ -3079,7 +3483,8 @@ function PrincipalDash({ user, onLogout }) {
   return (
     <SidebarLayout user={user} role="principal" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       <PlanBanner school={school} onUpgrade={goToBilling}/>
-      {tab==="overview" &&<Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/>}
+      {tab==="overview" &&<><OnboardingFlow school={school} user={user} classes={classes} terms={terms} teachers={teachers} students={students} reload={loadAll} onComplete={setTab}/><Overview students={students} classes={classes} teachers={teachers} terms={terms} school={school} onNavigate={setTab}/></>}
+      {tab==="analytics"&&<Analytics students={students} classes={classes} teachers={teachers} terms={terms} school={school}/>}
       {tab==="students"&&<ManageStudents students={students} classes={classes} reload={loadAll} schoolId={user.school_id} school={school} planInfo={planInfo} onUpgrade={goToBilling}/>}
       {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms} planInfo={planInfo} onUpgrade={goToBilling}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id} planInfo={planInfo} onUpgrade={goToBilling}/>}
