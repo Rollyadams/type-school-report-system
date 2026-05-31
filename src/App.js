@@ -286,14 +286,11 @@ const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 async function checkRateLimit(email) {
   try {
     const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
-    const { data, error } = await supabase
-      .from("login_attempts")
-      .select("id, attempted_at")
-      .eq("email", email.toLowerCase())
-      .eq("success", false)
-      .gte("attempted_at", windowStart)
-      .order("attempted_at", { ascending: false });
-    if (error) return { blocked: false }; // fail open if table missing
+    const { data, error } = await Promise.race([
+      supabase.from("login_attempts").select("id,attempted_at").eq("email",email.toLowerCase()).eq("success",false).gte("attempted_at",windowStart).order("attempted_at",{ascending:false}),
+      new Promise((_,r) => setTimeout(()=>r(new Error("timeout")), 3000))
+    ]);
+    if (error) return { blocked: false };
     if (data.length >= RATE_LIMIT_MAX) {
       const oldest = new Date(data[data.length - 1].attempted_at).getTime();
       const unlockAt = oldest + RATE_LIMIT_WINDOW_MS;
@@ -306,7 +303,10 @@ async function checkRateLimit(email) {
 
 async function recordLoginAttempt(email, success) {
   try {
-    await supabase.from("login_attempts").insert({ email: email.toLowerCase(), success });
+    await Promise.race([
+      supabase.from("login_attempts").insert({ email: email.toLowerCase(), success }),
+      new Promise(r => setTimeout(r, 2000))
+    ]);
   } catch {}
 }
 
@@ -455,7 +455,7 @@ function Login({ onLogin, onRegister }) {
         );
         setLoading(false);return;
       }
-      await recordLoginAttempt(email, true);
+      recordLoginAttempt(email, true); // fire and forget — don't await
       if (!isHashed(storedPw)) {
         const upgraded = await hashPassword(pass);
         await supabase.from('users').update({ password: upgraded }).eq('id', users[0].id);
