@@ -20,6 +20,38 @@ function useDebounce(value, delay = 400) {
   return debounced;
 }
 
+function usePagination(items, pageSize = 20) {
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [items.length]);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const paginated  = items.slice((page - 1) * pageSize, page * pageSize);
+  return { paginated, page, setPage, totalPages, total: items.length };
+}
+
+function Pagination({ page, totalPages, setPage, total, pageSize }) {
+  if (totalPages <= 1) return null;
+  const from = ((page - 1) * pageSize) + 1;
+  const to   = Math.min(page * pageSize, total);
+  return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 4px', marginTop:8 }}>
+      <span style={{ fontSize:12, color:'#64748b', fontWeight:600 }}>{from}–{to} of {total}</span>
+      <div style={{ display:'flex', gap:6 }}>
+        <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page===1}
+          style={{ background: page===1?'#f1f5f9':'#6366f1', color: page===1?'#94a3b8':'#fff', border:'none', borderRadius:8, padding:'6px 14px', fontWeight:700, fontSize:13, cursor: page===1?'default':'pointer' }}>
+          ‹ Prev
+        </button>
+        <span style={{ fontSize:12, color:'#64748b', fontWeight:700, alignSelf:'center', minWidth:60, textAlign:'center' }}>
+          {page} / {totalPages}
+        </span>
+        <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page===totalPages}
+          style={{ background: page===totalPages?'#f1f5f9':'#6366f1', color: page===totalPages?'#94a3b8':'#fff', border:'none', borderRadius:8, padding:'6px 14px', fontWeight:700, fontSize:13, cursor: page===totalPages?'default':'pointer' }}>
+          Next ›
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const NIGERIAN_SUBJECTS = {
   "Primary 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Primary 2":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
@@ -731,6 +763,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
       if(armA!==armB) return armA.localeCompare(armB);
       return a.full_name.localeCompare(b.full_name);
     });
+  const { paginated:pageStudents, page, setPage, totalPages, total } = usePagination(filtered, 20);
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -758,7 +791,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
       )}
       <input style={{...S.input,marginBottom:12}} placeholder="🔍 Search students…" value={search} onChange={e=>setSearch(e.target.value)}/>
       {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No students found.</div>}
-      {filtered.map(s=>{
+      {pageStudents.map(s=>{
         const cls=classes.find(c=>c.id===s.class_id);
         return(
           <div key={s.id} style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8}}>
@@ -774,6 +807,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
           </div>
         );
       })}
+      <Pagination page={page} totalPages={totalPages} setPage={setPage} total={total} pageSize={20}/>
     </div>
   );
 }
@@ -966,6 +1000,9 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
 function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgrade }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({full_name:"",email:"",class_id:"",password:"",confirm:""});
   const [saving,setSaving]=useState(false);
+  const [tPage,setTPage]=useState(1);
+  const T_PAGE_SIZE=20;
+  const pagedTeachers=teachers.slice((tPage-1)*T_PAGE_SIZE, tPage*T_PAGE_SIZE);
   const save=async()=>{
     if(!form.full_name.trim()||!form.email.trim()){alert("Name and email required");return;}
     if(!form.password.trim()){alert("Password is required");return;}
@@ -1004,7 +1041,7 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
         </div>
       )}
       {teachers.length===0&&!adding&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No teachers yet.</div>}
-      {teachers.map(t=>{
+      {pagedTeachers.map(t=>{
         const assigned=classes.find(c=>c.id===t.class_id);
         return(
           <div key={t.id} style={{...S.card,padding:"14px 16px",marginBottom:8}}>
@@ -1025,6 +1062,7 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
           </div>
         );
       })}
+      <Pagination page={tPage} totalPages={Math.max(1,Math.ceil(teachers.length/T_PAGE_SIZE))} setPage={setTPage} total={teachers.length} pageSize={T_PAGE_SIZE}/>
     </div>
   );
 }
@@ -1876,6 +1914,10 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
   const [summaryData, setSummaryData] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [subView, setSubView] = useState('mark'); // 'mark' | 'summary'
+  const [datePage, setDatePage]       = useState(1);
+  const [studentPage, setStudentPage] = useState(1);
+  const DATE_PAGE_SIZE    = 15;
+  const STUDENT_PAGE_SIZE = 20;
 
   const classStudents = allStudents.filter(s => s.class_id === selectedClass);
   const cls = classes.find(c => c.id === selectedClass);
@@ -2164,17 +2206,25 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {getSummaryByDate().map((row, i) => (
-                            <tr key={row.date} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                              <td style={{ padding: '8px 12px', fontWeight: 600, color: '#374151' }}>{row.date}</td>
-                              <td style={{ padding: '8px 12px', color: '#10b981', fontWeight: 700 }}>{row.present || 0}</td>
-                              <td style={{ padding: '8px 12px', color: '#f59e0b', fontWeight: 700 }}>{row.late || 0}</td>
-                              <td style={{ padding: '8px 12px', color: '#ef4444', fontWeight: 700 }}>{row.absent || 0}</td>
-                              <td style={{ padding: '8px 12px', color: '#64748b', fontWeight: 600 }}>{(row.present || 0) + (row.late || 0) + (row.absent || 0)}</td>
-                            </tr>
-                          ))}
+                          {(()=>{
+                            const byDate = getSummaryByDate();
+                            const start  = (datePage-1)*DATE_PAGE_SIZE;
+                            const paged  = byDate.slice(start, start+DATE_PAGE_SIZE);
+                            return paged.map((row,i)=>(
+                              <tr key={row.date} style={{ borderTop:'1px solid #f1f5f9', background:i%2===0?'#fff':'#fafafa' }}>
+                                <td style={{ padding:'8px 12px', fontWeight:600, color:'#374151' }}>{row.date}</td>
+                                <td style={{ padding:'8px 12px', color:'#10b981', fontWeight:700 }}>{row.present||0}</td>
+                                <td style={{ padding:'8px 12px', color:'#f59e0b', fontWeight:700 }}>{row.late||0}</td>
+                                <td style={{ padding:'8px 12px', color:'#ef4444', fontWeight:700 }}>{row.absent||0}</td>
+                                <td style={{ padding:'8px 12px', color:'#64748b', fontWeight:600 }}>{(row.present||0)+(row.late||0)+(row.absent||0)}</td>
+                              </tr>
+                            ));
+                          })()}
                         </tbody>
                       </table>
+                    </div>
+                    <div style={{padding:'0 12px 8px'}}>
+                      <Pagination page={datePage} totalPages={Math.max(1,Math.ceil(getSummaryByDate().length/DATE_PAGE_SIZE))} setPage={setDatePage} total={getSummaryByDate().length} pageSize={DATE_PAGE_SIZE}/>
                     </div>
                   </div>
 
@@ -2193,23 +2243,31 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {getStudentSummary().map((row, i) => {
-                            const pct = row.total ? Math.round(((row.present + row.late) / row.total) * 100) : 0;
-                            const pctColor = pct >= 75 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
-                            return (
-                              <tr key={row.student_id} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                                <td style={{ padding: '8px 10px', fontWeight: 600, color: '#374151', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.student?.full_name}</td>
-                                <td style={{ padding: '8px 10px', color: '#10b981', fontWeight: 700 }}>{row.present}</td>
-                                <td style={{ padding: '8px 10px', color: '#f59e0b', fontWeight: 700 }}>{row.late}</td>
-                                <td style={{ padding: '8px 10px', color: '#ef4444', fontWeight: 700 }}>{row.absent}</td>
-                                <td style={{ padding: '8px 10px' }}>
-                                  <span style={{ background: pctColor + '18', color: pctColor, borderRadius: 20, padding: '2px 10px', fontWeight: 800, fontSize: 11 }}>{pct}%</span>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {(()=>{
+                            const byStudent = getStudentSummary();
+                            const start     = (studentPage-1)*STUDENT_PAGE_SIZE;
+                            const paged     = byStudent.slice(start, start+STUDENT_PAGE_SIZE);
+                            return paged.map((row,i)=>{
+                              const pct = row.total ? Math.round(((row.present+row.late)/row.total)*100) : 0;
+                              const pctColor = pct>=75?'#10b981':pct>=50?'#f59e0b':'#ef4444';
+                              return(
+                                <tr key={row.student_id} style={{ borderTop:'1px solid #f1f5f9', background:i%2===0?'#fff':'#fafafa' }}>
+                                  <td style={{ padding:'8px 10px', fontWeight:600, color:'#374151', maxWidth:120, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{row.student?.full_name}</td>
+                                  <td style={{ padding:'8px 10px', color:'#10b981', fontWeight:700 }}>{row.present}</td>
+                                  <td style={{ padding:'8px 10px', color:'#f59e0b', fontWeight:700 }}>{row.late}</td>
+                                  <td style={{ padding:'8px 10px', color:'#ef4444', fontWeight:700 }}>{row.absent}</td>
+                                  <td style={{ padding:'8px 10px' }}>
+                                    <span style={{ background:pctColor+'18', color:pctColor, borderRadius:20, padding:'2px 10px', fontWeight:800, fontSize:11 }}>{pct}%</span>
+                                  </td>
+                                </tr>
+                              );
+                            });
+                          })()}
                         </tbody>
                       </table>
+                    </div>
+                    <div style={{padding:'0 12px 8px'}}>
+                      <Pagination page={studentPage} totalPages={Math.max(1,Math.ceil(getStudentSummary().length/STUDENT_PAGE_SIZE))} setPage={setStudentPage} total={getStudentSummary().length} pageSize={STUDENT_PAGE_SIZE}/>
                     </div>
                   </div>
                 </>
