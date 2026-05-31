@@ -3895,8 +3895,15 @@ export default function App() {
   const timerRef=useRef(null);
   const warnRef=useRef(null);
 
-  const handleLogin=(u)=>{ localStorage.setItem("school_user",JSON.stringify(u)); setUser(u); setScreen("app"); };
-  const handleRegistered=(u)=>{ if(u){ setUser(u); setScreen("app"); } else { setScreen("login"); } };
+  const handleLogin=(u)=>{
+    localStorage.setItem("school_user", JSON.stringify(u));
+    localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
+    setUser(u); setScreen("app");
+  };
+  const handleRegistered=(u)=>{ if(u){ 
+    localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
+    setUser(u); setScreen("app"); 
+  } else { setScreen("login"); } };
 
   const handleLogout=useCallback(()=>{
     localStorage.removeItem("school_user");
@@ -3907,7 +3914,7 @@ export default function App() {
 
   const checkInactivity=useCallback(()=>{
     const last=parseInt(localStorage.getItem(LAST_ACTIVE_KEY)||"0");
-    if(!last){ handleLogout(); return; }
+    if(!last) return; // fresh login — key set by handleLogin, don't logout
     const elapsed=Date.now()-last;
     if(elapsed>=INACTIVITY_TIMEOUT_MS){ handleLogout(); return; }
     if(elapsed>=INACTIVITY_TIMEOUT_MS-60000) setShowTimeoutWarning(true);
