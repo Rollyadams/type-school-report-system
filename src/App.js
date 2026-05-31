@@ -311,12 +311,125 @@ async function recordLoginAttempt(email, success) {
 }
 
 
+function ForgotPassword({ onBack }) {
+  const [email,setEmail]     = useState("");
+  const [step,setStep]       = useState("request"); // request | verify | reset | done
+  const [code,setCode]       = useState("");
+  const [newPass,setNewPass] = useState("");
+  const [confirm,setConfirm] = useState("");
+  const [loading,setLoading] = useState(false);
+  const [err,setErr]         = useState("");
+  const [userId,setUserId]   = useState(null);
+  const [generatedCode,setGeneratedCode] = useState(null);
+
+  const requestReset = async () => {
+    if (!email.trim()) { setErr("Enter your email address"); return; }
+    setLoading(true); setErr("");
+    const users = await db.get("users", { email: email.trim().toLowerCase() });
+    if (!users.length) { setErr("No account found with that email."); setLoading(false); return; }
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires   = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await supabase.from("users").update({ reset_code: resetCode, reset_expires: expires }).eq("id", users[0].id);
+    setUserId(users[0].id);
+    setGeneratedCode(resetCode);
+    setStep("verify");
+    setLoading(false);
+  };
+
+  const verifyCode = () => {
+    if (!code.trim()) { setErr("Enter the 6-digit code"); return; }
+    if (code.trim() !== generatedCode) { setErr("Invalid code. Try again."); return; }
+    setErr(""); setStep("reset");
+  };
+
+  const resetPassword = async () => {
+    if (!newPass) { setErr("Enter a new password"); return; }
+    if (newPass.length < 6) { setErr("Password must be at least 6 characters"); return; }
+    if (newPass !== confirm) { setErr("Passwords do not match"); return; }
+    setLoading(true); setErr("");
+    const hashed = await hashPassword(newPass);
+    await supabase.from("users").update({ password: hashed, reset_code: null, reset_expires: null }).eq("id", userId);
+    setLoading(false); setStep("done");
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:"linear-gradient(135deg,#1e3a8a,#6366f1)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div style={{ background:"#fff", borderRadius:24, padding:36, width:"100%", maxWidth:400, boxShadow:"0 20px 60px #0000003a" }}>
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>🔐</div>
+          <h1 style={{ margin:0, fontSize:18, fontWeight:900, color:"#1e3a8a" }}>Reset Password</h1>
+        </div>
+
+        {step === "request" && (
+          <>
+            <p style={{ fontSize:13, color:"#64748b", marginBottom:16, textAlign:"center" }}>Enter your registered email address. We'll generate a reset code for you.</p>
+            <label style={S.label}>Email</label>
+            <input style={{ ...S.input, marginBottom:16 }} type="email" placeholder="your@email.com" value={email} onChange={e => setEmail(e.target.value)} />
+            {err && <div style={{ color:"#ef4444", fontSize:13, marginBottom:12, textAlign:"center" }}>{err}</div>}
+            <button onClick={requestReset} disabled={loading} style={{ ...S.btn(), width:"100%", padding:13, fontSize:15 }}>
+              {loading ? "Checking…" : "Generate Reset Code →"}
+            </button>
+          </>
+        )}
+
+        {step === "verify" && (
+          <>
+            <div style={{ background:"#f0fdf4", border:"1.5px solid #10b981", borderRadius:12, padding:16, marginBottom:16, textAlign:"center" }}>
+              <div style={{ fontWeight:800, color:"#059669", fontSize:13, marginBottom:4 }}>Reset Code Generated</div>
+              <div style={{ fontSize:32, fontWeight:900, color:"#1e3a8a", letterSpacing:8 }}>{generatedCode}</div>
+              <div style={{ fontSize:11, color:"#64748b", marginTop:4 }}>Valid for 15 minutes</div>
+            </div>
+            <p style={{ fontSize:12, color:"#64748b", marginBottom:16, textAlign:"center" }}>Enter the 6-digit code shown above to continue.</p>
+            <label style={S.label}>Reset Code</label>
+            <input style={{ ...S.input, marginBottom:16, letterSpacing:6, fontSize:20, textAlign:"center", fontWeight:800 }}
+              type="text" maxLength={6} placeholder="000000" value={code} onChange={e => setCode(e.target.value)} />
+            {err && <div style={{ color:"#ef4444", fontSize:13, marginBottom:12, textAlign:"center" }}>{err}</div>}
+            <button onClick={verifyCode} style={{ ...S.btn("#6366f1"), width:"100%", padding:13, fontSize:15 }}>Verify Code →</button>
+          </>
+        )}
+
+        {step === "reset" && (
+          <>
+            <p style={{ fontSize:13, color:"#64748b", marginBottom:16, textAlign:"center" }}>Enter your new password.</p>
+            <label style={S.label}>New Password</label>
+            <input style={{ ...S.input, marginBottom:12 }} type="password" placeholder="••••••••" value={newPass} onChange={e => setNewPass(e.target.value)} />
+            <label style={S.label}>Confirm Password</label>
+            <input style={{ ...S.input, marginBottom:16 }} type="password" placeholder="••••••••" value={confirm} onChange={e => setConfirm(e.target.value)} />
+            {err && <div style={{ color:"#ef4444", fontSize:13, marginBottom:12, textAlign:"center" }}>{err}</div>}
+            <button onClick={resetPassword} disabled={loading} style={{ ...S.btn("#10b981"), width:"100%", padding:13, fontSize:15 }}>
+              {loading ? "Saving…" : "Save New Password →"}
+            </button>
+          </>
+        )}
+
+        {step === "done" && (
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:48, marginBottom:12 }}>✅</div>
+            <div style={{ fontWeight:800, color:"#059669", fontSize:16, marginBottom:8 }}>Password Reset!</div>
+            <div style={{ fontSize:13, color:"#64748b", marginBottom:20 }}>You can now sign in with your new password.</div>
+            <button onClick={onBack} style={{ ...S.btn(), width:"100%", padding:13, fontSize:15 }}>Back to Sign In →</button>
+          </div>
+        )}
+
+        {step !== "done" && (
+          <p style={{ textAlign:"center", marginTop:16 }}>
+            <span onClick={onBack} style={{ color:"#64748b", fontSize:13, cursor:"pointer" }}>← Back to Sign In</span>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Login({ onLogin, onRegister }) {
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const [mode,setMode]=useState("staff");
   const [admNum,setAdmNum]=useState(""); const [parentLoading,setParentLoading]=useState(false);
   const [parentErr,setParentErr]=useState(""); const [parentData,setParentData]=useState(null);
+  const [showForgot,setShowForgot]=useState(false);
+
+  if (showForgot) return <ForgotPassword onBack={() => setShowForgot(false)} />;
 
   const login = async () => {
     if(!email||!pass){setErr("Please enter email and password");return;}
@@ -398,6 +511,9 @@ function Login({ onLogin, onRegister }) {
             <div style={{marginBottom:20}}><label style={S.label}>Password</label><input style={S.input} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&login()} placeholder="••••••••" type="password"/></div>
             {err&&<div style={{color:"#ef4444",fontSize:13,marginBottom:12,textAlign:"center"}}>{err}</div>}
             <button onClick={login} disabled={loading} style={{...S.btn(),width:"100%",padding:"13px",fontSize:15}}>{loading?"Signing in…":"Sign In →"}</button>
+            <p style={{textAlign:"center",marginTop:12}}>
+              <span onClick={()=>setShowForgot(true)} style={{color:"#6366f1",fontSize:13,cursor:"pointer",fontWeight:600}}>Forgot password?</span>
+            </p>
           </>
         ):(
           <>
@@ -2634,6 +2750,210 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
           plan: 'pro',
           plan_expires_at: expiresAt,
           paystack_ref: transaction.reference,
+// ── Timetable Generator ────────────────────────────────────────
+const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
+
+function Timetable({ user, classes, school, isPrincipal }) {
+  const [selectedClass, setSelectedClass] = useState(user.class_id || "");
+  const [periods, setPeriods]             = useState([]);
+  const [timetable, setTimetable]         = useState({});
+  const [saving, setSaving]               = useState(false);
+  const [saved, setSaved]                 = useState(false);
+  const [loading, setLoading]             = useState(false);
+  const [newPeriod, setNewPeriod]         = useState({ label:"", start:"", end:"" });
+  const [addingPeriod, setAddingPeriod]   = useState(false);
+
+  const cls = classes.find(c => c.id === selectedClass);
+
+  useEffect(() => {
+    if (!selectedClass) return;
+    setLoading(true); setSaved(false);
+    supabase.from("timetable").select("*").eq("class_id", selectedClass)
+      .then(({ data }) => {
+        if (data && data.length) {
+          const p = JSON.parse(data[0].periods || "[]");
+          const t = JSON.parse(data[0].slots   || "{}");
+          setPeriods(p); setTimetable(t);
+        } else {
+          setPeriods([]); setTimetable({});
+        }
+        setLoading(false);
+      });
+  }, [selectedClass]);
+
+  const slotKey = (day, periodIdx) => `${day}_${periodIdx}`;
+
+  const setSlot = (day, periodIdx, value) => {
+    setSaved(false);
+    setTimetable(p => ({ ...p, [slotKey(day,periodIdx)]: sanitize(value) }));
+  };
+
+  const addPeriod = () => {
+    if (!newPeriod.label.trim()) return;
+    setPeriods(p => [...p, { ...newPeriod, label: sanitize(newPeriod.label) }]);
+    setNewPeriod({ label:"", start:"", end:"" });
+    setAddingPeriod(false); setSaved(false);
+  };
+
+  const removePeriod = (idx) => {
+    setPeriods(p => p.filter((_,i) => i !== idx));
+    setSaved(false);
+  };
+
+  const saveTimetable = async () => {
+    if (!selectedClass) return;
+    setSaving(true);
+    const { data: existing } = await supabase.from("timetable").select("id").eq("class_id", selectedClass).single();
+    const payload = {
+      class_id:  selectedClass,
+      school_id: school?.id || user.school_id,
+      periods:   JSON.stringify(periods),
+      slots:     JSON.stringify(timetable),
+      updated_at: new Date().toISOString(),
+    };
+    if (existing?.id) {
+      await supabase.from("timetable").update(payload).eq("id", existing.id);
+    } else {
+      await supabase.from("timetable").insert(payload);
+    }
+    setSaving(false); setSaved(true);
+  };
+
+  const printTimetable = () => {
+    const clsName = cls ? `${cls.name} ${cls.arm||""}` : "Class";
+    const rows = periods.map((p,i) => {
+      const cells = DAYS.map(d => `<td style="border:1px solid #ddd;padding:8px;text-align:center;font-size:12px">${timetable[slotKey(d,i)]||""}</td>`).join("");
+      return `<tr><td style="border:1px solid #ddd;padding:8px;font-weight:700;font-size:12px;background:#f8fafc">${p.label}${p.start?`<br><span style="font-size:10px;color:#64748b">${p.start}–${p.end}</span>`:""}</td>${cells}</tr>`;
+    }).join("");
+    const html = `
+      <html><head><title>Timetable — ${clsName}</title>
+      <style>body{font-family:Arial,sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th{background:#1e3a8a;color:#fff;padding:10px;font-size:12px}@media print{button{display:none}}</style>
+      </head><body>
+      <h2 style="text-align:center;color:#1e3a8a">${school?.name||"School"}</h2>
+      <h3 style="text-align:center">Class Timetable — ${clsName}</h3>
+      <table><thead><tr><th>Period</th>${DAYS.map(d=>`<th>${d}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody></table>
+      <script>window.onload=()=>window.print()</script>
+      </body></html>`;
+    const w = window.open("","_blank");
+    w.document.write(html); w.document.close();
+  };
+
+  return (
+    <div>
+      <div style={S.section("#0891b2")}><span>📅</span><span style={{fontWeight:800,color:"#0891b2"}}>Timetable</span></div>
+
+      {!user.class_id && (
+        <div style={S.card}>
+          <label style={S.label}>Select Class</label>
+          <select style={S.input} value={selectedClass} onChange={e => { setSelectedClass(e.target.value); }}>
+            <option value="">Choose class…</option>
+            {classes.map(c => <option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
+          </select>
+        </div>
+      )}
+
+      {!selectedClass && <div style={{textAlign:"center",color:"#94a3b8",padding:40,fontSize:14}}>Select a class to view or edit its timetable.</div>}
+
+      {selectedClass && (
+        <>
+          {/* Periods manager */}
+          <div style={S.card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <span style={{fontWeight:800,color:"#1e293b",fontSize:14}}>Periods ({periods.length})</span>
+              <button onClick={()=>setAddingPeriod(true)} style={{...S.btn("#0891b2"),padding:"6px 14px",fontSize:12}}>+ Add Period</button>
+            </div>
+
+            {addingPeriod && (
+              <div style={{background:"#f0f9ff",borderRadius:10,padding:12,marginBottom:12,border:"1.5px solid #bae6fd"}}>
+                <label style={S.label}>Period Name</label>
+                <input style={{...S.input,marginBottom:8}} placeholder="e.g. Period 1 or Assembly" value={newPeriod.label} onChange={e=>setNewPeriod(p=>({...p,label:e.target.value}))}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                  <div><label style={S.label}>Start Time</label><input type="time" style={S.input} value={newPeriod.start} onChange={e=>setNewPeriod(p=>({...p,start:e.target.value}))}/></div>
+                  <div><label style={S.label}>End Time</label><input type="time" style={S.input} value={newPeriod.end} onChange={e=>setNewPeriod(p=>({...p,end:e.target.value}))}/></div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={addPeriod} style={{...S.btn("#0891b2"),flex:1,padding:10,fontSize:13}}>Add</button>
+                  <button onClick={()=>setAddingPeriod(false)} style={{...S.btn("#e2e8f0"),color:"#64748b",flex:1,padding:10,fontSize:13}}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {periods.length === 0 && !addingPeriod && (
+              <div style={{textAlign:"center",color:"#94a3b8",fontSize:13,padding:16}}>No periods yet. Add your first period above.</div>
+            )}
+
+            {periods.map((p,i) => (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<periods.length-1?"1px solid #f1f5f9":"none"}}>
+                <div>
+                  <span style={{fontWeight:700,color:"#1e293b",fontSize:13}}>{p.label}</span>
+                  {p.start && <span style={{fontSize:11,color:"#64748b",marginLeft:8}}>{p.start} – {p.end}</span>}
+                </div>
+                <button onClick={()=>removePeriod(i)} style={{background:"#fee2e2",border:"none",borderRadius:6,color:"#ef4444",padding:"3px 10px",cursor:"pointer",fontSize:11,fontWeight:700}}>Remove</button>
+              </div>
+            ))}
+          </div>
+
+          {/* Timetable grid */}
+          {periods.length > 0 && (
+            <div style={{...S.card,padding:0,overflow:"hidden"}}>
+              <div style={{padding:"12px 16px",fontWeight:800,color:"#1e293b",borderBottom:"1px solid #f1f5f9",fontSize:13}}>
+                📋 {cls ? `${cls.name} ${cls.arm||""}` : ""} Timetable
+              </div>
+              {loading ? (
+                <div style={{textAlign:"center",padding:32,color:"#94a3b8"}}>Loading…</div>
+              ) : (
+                <div style={{overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:500}}>
+                    <thead>
+                      <tr style={{background:"#1e3a8a"}}>
+                        <th style={{padding:"10px 12px",color:"#fff",textAlign:"left",fontWeight:700,fontSize:11,minWidth:90}}>Period</th>
+                        {DAYS.map(d => <th key={d} style={{padding:"10px 8px",color:"#fff",textAlign:"center",fontWeight:700,fontSize:11}}>{d.slice(0,3)}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {periods.map((p,i) => (
+                        <tr key={i} style={{borderTop:"1px solid #f1f5f9",background:i%2===0?"#fff":"#f8fafc"}}>
+                          <td style={{padding:"8px 12px",fontWeight:700,color:"#374151",fontSize:11}}>
+                            {p.label}
+                            {p.start && <div style={{fontSize:10,color:"#94a3b8"}}>{p.start}–{p.end}</div>}
+                          </td>
+                          {DAYS.map(d => (
+                            <td key={d} style={{padding:4}}>
+                              <input
+                                style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 6px",fontSize:11,textAlign:"center",background:"#fff",outline:"none",boxSizing:"border-box"}}
+                                placeholder="Subject"
+                                value={timetable[slotKey(d,i)]||""}
+                                onChange={e => setSlot(d,i,e.target.value)}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {periods.length > 0 && (
+            <>
+              {saved && <div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Timetable saved</div>}
+              <div style={{display:"flex",gap:10,marginTop:12}}>
+                <button onClick={saveTimetable} disabled={saving} style={{...S.btn(saved?"#94a3b8":"#0891b2"),flex:2,padding:13,fontSize:14}}>
+                  {saving?"Saving…":saved?"✅ Saved":"💾 Save Timetable"}
+                </button>
+                <button onClick={printTimetable} style={{...S.btn("#6366f1"),flex:1,padding:13,fontSize:14}}>🖨️ Print</button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
         }).eq('id', school?.id);
         setSuccess(true);
         if (onUpgradeSuccess) onUpgradeSuccess();
@@ -2782,6 +3102,7 @@ function PrincipalDash({ user, onLogout }) {
     {id:"classes",  label:"Classes",   icon:"🏫", desc:"Manage class arms"},
     {id:"teachers", label:"Teachers",  icon:"👩‍🏫", desc:"Staff & class assignment"},
     {id:"results",  label:"Results",   icon:"📋", desc:"View & generate report cards"},
+    {id:"timetable",label:"Timetable", icon:"🗓️", desc:"Class timetable generator"},
     {id:"receipts", label:"Receipts",  icon:"🧾", desc:"Issue payment receipts"},
     {id:"messages", label:"Messages",  icon:"📨", desc:"WhatsApp parent messages"},
     {id:"billing",  label:"Billing",   icon:"💎", desc:"Plans & subscription"},
@@ -2799,6 +3120,7 @@ function PrincipalDash({ user, onLogout }) {
       {tab==="classes" &&<ManageClasses classes={classes} reload={loadAll} schoolId={user.school_id} students={students} terms={terms} planInfo={planInfo} onUpgrade={goToBilling}/>}
       {tab==="teachers"&&<ManageTeachers teachers={teachers} classes={classes} reload={loadAll} schoolId={user.school_id} planInfo={planInfo} onUpgrade={goToBilling}/>}
       {tab==="results" &&<FeatureGate feature="results_pdf" school={school} onUpgrade={goToBilling}><ViewResults students={students} classes={classes} terms={terms} school={school} isPrincipal={true}/></FeatureGate>}
+      {tab==="timetable"&&<Timetable user={user} classes={classes} school={school} isPrincipal={true}/>}
       {tab==="receipts"&&<FeatureGate feature="receipts" school={school} onUpgrade={goToBilling}><ReceiptInvoice students={students} classes={classes} terms={terms} school={school} user={user} logoDataUrl={logoDataUrl}/></FeatureGate>}
       {tab==="messages"&&<Messages students={students} classes={classes} school={school}/>}
       {tab==="billing" &&<BillingScreen school={school} user={user} onUpgradeSuccess={loadAll}/>}
@@ -2997,6 +3319,7 @@ function TeacherDash({ user, onLogout }) {
   const tabs=[
     {id:"results",    label:"Enter Results",    icon:"📝", desc:"Score entry per student"},
     {id:"attendance", label:"Daily Attendance", icon:"📅", desc:"Mark & track daily attendance"},
+    {id:"timetable",  label:"Timetable",        icon:"🗓️", desc:"View & edit class timetable"},
     {id:"report",     label:"View Reports",     icon:"📋", desc:"View & download report cards"},
   ];
 
@@ -3069,6 +3392,7 @@ function TeacherDash({ user, onLogout }) {
     <SidebarLayout user={user} role="teacher" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
       {tab==="results"&&<TeacherResults/>}
       {tab==="attendance"&&<FeatureGate feature="attendance" school={school} onUpgrade={()=>{}}><DailyAttendance user={user} classes={classes} terms={terms} students={allSchoolStudents}/></FeatureGate>}
+      {tab==="timetable" &&<Timetable user={user} classes={classes} school={school} isPrincipal={false}/>}
       {tab==="report"&&<ViewResults students={students} classes={classes.length?classes:[]} terms={terms} school={school} isPrincipal={false}/>}
     </SidebarLayout>
   );
