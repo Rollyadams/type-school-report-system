@@ -4,6 +4,14 @@ import { useSyncEngine, retryFailed } from './syncEngine';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
+const getLocalDate = () => {
+  const d = new Date();
+  const year  = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day   = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 async function hashPassword(password) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
@@ -2018,7 +2026,7 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
 
 // ── Daily Attendance ────────────────────────────────────────────
 function DailyAttendance({ user, classes, terms, students: allStudents }) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDate();
   const [selectedClass, setSelectedClass] = useState(user.class_id || '');
   const [selectedDate, setSelectedDate] = useState(today);
   const [records, setRecords] = useState({}); // { student_id: 'present'|'absent'|'late' }
@@ -2482,7 +2490,7 @@ const generateReceiptPDF = async (receipt, student, cls, term, school, logoDataU
 };
 
 function ReceiptInvoice({ students, classes, terms, school, user, logoDataUrl }) {
-  const today = new Date().toISOString().split("T")[0];
+  const today = getLocalDate();
   const currentTerm = terms.find(function(t){return t.is_current;}) || terms[0];
   const blankForm = function() {
     return {
