@@ -4052,19 +4052,23 @@ export default function App() {
 
   useEffect(()=>{
     if(!user){ clearTimeout(timerRef.current); clearTimeout(warnRef.current); return; }
-    // Immediately check — catches waking from sleep after long background
     checkInactivity();
     const events=["mousedown","mousemove","keydown","touchstart","touchmove","scroll","click"];
     events.forEach(e=>document.addEventListener(e,resetTimer,{passive:true}));
-    // visibilitychange = phone wakes up or user switches back to tab
     const onVisible=()=>{ if(document.visibilityState==="visible") checkInactivity(); };
     document.addEventListener("visibilitychange",onVisible);
     window.addEventListener("focus",checkInactivity);
+
+    // Logout when app is closed or swiped away
+    const onPageHide=()=>{ handleLogout(); };
+    window.addEventListener("pagehide", onPageHide);
+
     resetTimer();
     return()=>{
       events.forEach(e=>document.removeEventListener(e,resetTimer));
       document.removeEventListener("visibilitychange",onVisible);
       window.removeEventListener("focus",checkInactivity);
+      window.removeEventListener("pagehide", onPageHide);
       clearTimeout(timerRef.current); clearTimeout(warnRef.current);
     };
   },[user]);
