@@ -3072,8 +3072,34 @@ function Timetable({ user, classes, school, isPrincipal }) {
                 <label style={S.label}>Period Name</label>
                 <input style={{...S.input,marginBottom:8}} placeholder="e.g. Period 1 or Assembly" value={newPeriod.label} onChange={e=>setNewPeriod(p=>({...p,label:e.target.value}))}/>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                  <div><label style={S.label}>Start Time</label><input type="text" style={S.input} placeholder="e.g. 8:00 AM" value={newPeriod.start} onChange={e=>setNewPeriod(p=>({...p,start:e.target.value}))}/></div>
-                  <div><label style={S.label}>End Time</label><input type="text" style={S.input} placeholder="e.g. 8:40 AM" value={newPeriod.end} onChange={e=>setNewPeriod(p=>({...p,end:e.target.value}))}/></div>
+                  <div>
+                    <label style={S.label}>Start Time</label>
+                    <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                      <select style={{...S.input,flex:1,padding:'8px 4px'}} value={newPeriod.start.split(':')[0]||''} onChange={e=>setNewPeriod(p=>({...p,start:`${e.target.value}:${p.start.split(':')[1]||'00'}`}))}>
+                        <option value=''>HH</option>
+                        {Array.from({length:24},(_,i)=>String(i).padStart(2,'0')).map(h=><option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <span style={{fontWeight:900,color:'#64748b'}}>:</span>
+                      <select style={{...S.input,flex:1,padding:'8px 4px'}} value={newPeriod.start.split(':')[1]||''} onChange={e=>setNewPeriod(p=>({...p,start:`${p.start.split(':')[0]||'07'}:${e.target.value}`}))}>
+                        <option value=''>MM</option>
+                        {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m=><option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label style={S.label}>End Time</label>
+                    <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                      <select style={{...S.input,flex:1,padding:'8px 4px'}} value={newPeriod.end.split(':')[0]||''} onChange={e=>setNewPeriod(p=>({...p,end:`${e.target.value}:${p.end.split(':')[1]||'00'}`}))}>
+                        <option value=''>HH</option>
+                        {Array.from({length:24},(_,i)=>String(i).padStart(2,'0')).map(h=><option key={h} value={h}>{h}</option>)}
+                      </select>
+                      <span style={{fontWeight:900,color:'#64748b'}}>:</span>
+                      <select style={{...S.input,flex:1,padding:'8px 4px'}} value={newPeriod.end.split(':')[1]||''} onChange={e=>setNewPeriod(p=>({...p,end:`${p.end.split(':')[0]||'07'}:${e.target.value}`}))}>
+                        <option value=''>MM</option>
+                        {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m=><option key={m} value={m}>{m}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={addPeriod} style={{...S.btn("#0891b2"),flex:1,padding:10,fontSize:13}}>Add</button>
@@ -3948,7 +3974,7 @@ function Register({ onRegistered }) {
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
       const { password: _pw2, ...safeNewUser } = newUser;
-      localStorage.setItem("school_user", JSON.stringify(safeNewUser));
+      sessionStorage.setItem("school_user", JSON.stringify(safeNewUser));
       onRegistered(safeNewUser);
     }catch(e){setErr("Registration failed. Check your connection and try again.");}
     setLoading(false);
@@ -4008,7 +4034,7 @@ const LAST_ACTIVE_KEY = "last_active_ts";
 
 export default function App() {
   const [user,setUser]=useState(()=>{
-    try{ const s=localStorage.getItem("school_user"); return s?JSON.parse(s):null; }
+    try{ const s=sessionStorage.getItem("school_user"); return s?JSON.parse(s):null; }
     catch{ return null; }
   });
   const [screen,setScreen]=useState("login");
@@ -4017,7 +4043,7 @@ export default function App() {
   const warnRef=useRef(null);
 
   const handleLogin=(u)=>{
-    localStorage.setItem("school_user", JSON.stringify(u));
+    sessionStorage.setItem("school_user", JSON.stringify(u));
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     setUser(u); setScreen("app");
   };
@@ -4027,7 +4053,7 @@ export default function App() {
   } else { setScreen("login"); } };
 
   const handleLogout=useCallback(()=>{
-    localStorage.removeItem("school_user");
+    sessionStorage.removeItem("school_user");
     localStorage.removeItem(LAST_ACTIVE_KEY);
     setUser(null); setScreen("login"); setShowTimeoutWarning(false);
     clearTimeout(timerRef.current); clearTimeout(warnRef.current);
