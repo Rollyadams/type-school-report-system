@@ -2249,7 +2249,17 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
         ) : (
           <div>
             <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-              <input type="time" style={{ ...S.input, flex:1 }} value={reminderTime} onChange={e => setReminderTime(e.target.value)} />
+              <div style={{ display:'flex', gap:6, flex:1, alignItems:'center' }}>
+                <select style={{ ...S.input, flex:1 }} value={reminderTime.split(':')[0]||''} onChange={e => setReminderTime(`${e.target.value}:${reminderTime.split(':')[1]||'00'}`)}>
+                  <option value=''>HH</option>
+                  {Array.from({length:24},(_,i)=>String(i).padStart(2,'0')).map(h=><option key={h} value={h}>{h}</option>)}
+                </select>
+                <span style={{fontWeight:900,color:'#64748b'}}>:</span>
+                <select style={{ ...S.input, flex:1 }} value={reminderTime.split(':')[1]||''} onChange={e => setReminderTime(`${reminderTime.split(':')[0]||'07'}:${e.target.value}`)}>
+                  <option value=''>MM</option>
+                  {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m=><option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
               <button onClick={saveReminder} disabled={!reminderTime || reminderSaving}
                 style={{ ...S.btn('#10b981'), padding:'10px 16px', fontSize:13, flexShrink:0 }}>
                 {reminderSaving ? '…' : 'Set'}
