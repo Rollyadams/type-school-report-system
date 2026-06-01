@@ -2028,20 +2028,86 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
 function DailyAttendance({ user, classes, terms, students: allStudents }) {
   const today = getLocalDate();
   const [selectedClass, setSelectedClass] = useState(user.class_id || '');
-  const [selectedDate, setSelectedDate] = useState(today);
-  const [records, setRecords] = useState({}); // { student_id: 'present'|'absent'|'late' }
-  const [existingIds, setExistingIds] = useState({}); // { student_id: db_row_id }
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [viewDate, setViewDate] = useState(today);
-  const [summaryData, setSummaryData] = useState(null);
+  const [selectedDate, setSelectedDate]   = useState(today);
+  const [records, setRecords]             = useState({});
+  const [existingIds, setExistingIds]     = useState({});
+  const [loading, setLoading]             = useState(false);
+  const [saving, setSaving]               = useState(false);
+  const [saved, setSaved]                 = useState(false);
+  const [viewDate, setViewDate]           = useState(today);
+  const [summaryData, setSummaryData]     = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
-  const [subView, setSubView] = useState('mark'); // 'mark' | 'summary'
-  const [datePage, setDatePage]       = useState(1);
-  const [studentPage, setStudentPage] = useState(1);
+  const [subView, setSubView]             = useState('mark');
+  const [datePage, setDatePage]           = useState(1);
+  const [studentPage, setStudentPage]     = useState(1);
   const DATE_PAGE_SIZE    = 15;
   const STUDENT_PAGE_SIZE = 20;
+
+  // ── Live clock ──
+  const [clockTime, setClockTime] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setClockTime(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const timeStr = clockTime.toLocaleTimeString('en-NG', { hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:true });
+  const dateStr = clockTime.toLocaleDateString('en-NG', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // ── Push Reminder ──
+  const VAPID_PUBLIC_KEY = 'BF3kYAQq377ImMwdCudYjbQswRLIM3J3neIxd0_CANNv9yndJhGuh-hpZqh8dE50kNTs7RfhzgFT2RtwVnLNvDo';
+  const [reminderTime, setReminderTime] = useState('');
+  const [reminderSet,  setReminderSet]  = useState(false);
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [notifStatus, setNotifStatus]   = useState('');
+
+  useEffect(() => {
+    supabase.from('push_subscriptions').select('reminder_time').eq('user_id', user.id).single()
+      .then(({ data }) => {
+        if (data?.reminder_time) { setReminderTime(data.reminder_time); setReminderSet(true); }
+      });
+  }, [user.id]);
+
+  const saveReminder = async () => {
+    if (!reminderTime) return;
+    setReminderSaving(true); setNotifStatus('');
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        setNotifStatus('error:Push notifications not supported on this browser.');
+        setReminderSaving(false); return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        setNotifStatus('error:Please allow notifications in your browser settings.');
+        setReminderSaving(false); return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: VAPID_PUBLIC_KEY,
+        });
+      }
+      const { endpoint, keys } = sub.toJSON();
+      await supabase.from('push_subscriptions').upsert({
+        user_id:       user.id,
+        school_id:     user.school_id,
+        endpoint,
+        p256dh:        keys.p256dh,
+        auth:          keys.auth,
+        reminder_time: reminderTime,
+      }, { onConflict: 'user_id' });
+      setReminderSet(true);
+      setNotifStatus('success:Reminder set! You will be notified daily at ' + reminderTime);
+    } catch (e) {
+      setNotifStatus('error:' + (e.message || 'Failed to set reminder'));
+    }
+    setReminderSaving(false);
+  };
+
+  const clearReminder = async () => {
+    await supabase.from('push_subscriptions').delete().eq('user_id', user.id);
+    setReminderTime(''); setReminderSet(false); setNotifStatus('');
+  };
 
   const classStudents = allStudents.filter(s => s.class_id === selectedClass);
   const cls = classes.find(c => c.id === selectedClass);
@@ -2161,6 +2227,43 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
       <div style={S.section('#10b981')}>
         <span>📅</span>
         <span style={{ fontWeight: 800, color: '#10b981' }}>Daily Attendance</span>
+      </div>
+
+      {/* Live clock */}
+      <div style={{ background:'linear-gradient(135deg,#1e3a8a,#6366f1)', borderRadius:16, padding:'16px', marginBottom:16, textAlign:'center', color:'#fff' }}>
+        <div style={{ fontSize:32, fontWeight:900, letterSpacing:2, fontVariantNumeric:'tabular-nums' }}>{timeStr}</div>
+        <div style={{ fontSize:12, color:'#a5b4fc', marginTop:4, fontWeight:600 }}>{dateStr}</div>
+      </div>
+
+      {/* Reminder setup */}
+      <div style={{ ...S.card, marginBottom:16 }}>
+        <div style={{ fontWeight:800, color:'#1e293b', fontSize:13, marginBottom:10 }}>⏰ Daily Reminder</div>
+        {reminderSet ? (
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <div style={{ fontSize:13, fontWeight:700, color:'#10b981' }}>✅ Reminder set for {reminderTime}</div>
+              <div style={{ fontSize:11, color:'#64748b', marginTop:2 }}>Push notification sent daily — even when app is closed</div>
+            </div>
+            <button onClick={clearReminder} style={{ background:'#fee2e2', border:'none', borderRadius:8, color:'#ef4444', padding:'6px 12px', cursor:'pointer', fontSize:12, fontWeight:700 }}>Clear</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <input type="time" style={{ ...S.input, flex:1 }} value={reminderTime} onChange={e => setReminderTime(e.target.value)} />
+              <button onClick={saveReminder} disabled={!reminderTime || reminderSaving}
+                style={{ ...S.btn('#10b981'), padding:'10px 16px', fontSize:13, flexShrink:0 }}>
+                {reminderSaving ? '…' : 'Set'}
+              </button>
+            </div>
+            <div style={{ fontSize:11, color:'#64748b', marginTop:6 }}>You'll receive a push notification at this time daily</div>
+          </div>
+        )}
+        {notifStatus && (
+          <div style={{ marginTop:8, fontSize:12, fontWeight:600,
+            color: notifStatus.startsWith('success') ? '#059669' : '#ef4444' }}>
+            {notifStatus.replace(/^success:|^error:/, '')}
+          </div>
+        )}
       </div>
 
       {/* Class selector (only if not assigned) */}
