@@ -847,6 +847,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
   const debouncedSearch = useDebounce(search, 300);
   const [saving,setSaving]=useState(false); const [editId,setEditId]=useState(null);
   const resetForm=()=>setForm({full_name:"",admission_number:"",gender:"",date_of_birth:"",guardian_name:"",guardian_phone:"",class_id:""});
+  useBackOverride(()=>{ resetForm(); setEditId(null); setAdding(false); }, adding);
   const save=async()=>{
     if(!form.full_name.trim()){alert("Student name required");return;}
     if(!form.class_id){alert("Please select a class");return;}
@@ -943,11 +944,12 @@ const customSubjectsStore = {};
 function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, onUpgrade }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({name:"",arm:"",level:""});
   const [selectedClass,setSelectedClass]=useState(null);
-  const [customSubjects,setCustomSubjects]=useState({}); // {classId:[...subjects]}
+  const [customSubjects,setCustomSubjects]=useState({});
   const [newSubject,setNewSubject]=useState("");
   const [autoPromoting,setAutoPromoting]=useState(false);
   const [autoResult,setAutoResult]=useState(null);
   const levels=Object.keys(NIGERIAN_SUBJECTS);
+  useBackOverride(()=>{ if(selectedClass){setSelectedClass(null);} else {setAdding(false);setForm({name:"",arm:"",level:""}); } }, adding||!!selectedClass);
 
   // Load custom subjects from localStorage on mount
   useEffect(()=>{
@@ -1127,6 +1129,7 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
   const [tPage,setTPage]=useState(1);
   const T_PAGE_SIZE=20;
   const pagedTeachers=teachers.slice((tPage-1)*T_PAGE_SIZE, tPage*T_PAGE_SIZE);
+  useBackOverride(()=>{ setAdding(false); setForm({full_name:"",email:"",class_id:"",password:"",confirm:""}); }, adding);
   const save=async()=>{
     if(!form.full_name.trim()||!form.email.trim()){alert("Name and email required");return;}
     if(!form.password.trim()){alert("Password is required");return;}
@@ -1892,8 +1895,21 @@ function SyncBanner() {
   );
 }
 
+const BackOverrideContext = React.createContext(null);
+
+function useBackOverride(fn, active) {
+  const ctx = React.useContext(BackOverrideContext);
+  useEffect(() => {
+    if (!ctx) return;
+    if (active && fn) { ctx.setOverride(() => fn); }
+    else { ctx.setOverride(null); }
+    return () => ctx.setOverride(null);
+  }, [active]);
+}
+
 function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiveTab, loading, children }) {
   const [open, setOpen] = useState(false);
+  const [backOverride, setBackOverride] = useState(null);
   const activeTabObj = tabs.find(t => t.id === activeTab);
   const isP = role === "principal";
   const grad = isP ? "linear-gradient(135deg,#1e3a8a,#4338ca)" : "linear-gradient(135deg,#0f766e,#0ea5e9)";
@@ -1901,22 +1917,21 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
   const prevTabRef = useRef(null);
   const defaultTab = tabs[0]?.id;
 
-  // Push initial history entry on mount
   useEffect(() => { window.history.pushState({ tab: activeTab }, ""); }, []);
 
-  // Push new state on every tab change
   useEffect(() => {
     if (prevTabRef.current === null) { prevTabRef.current = activeTab; return; }
     if (prevTabRef.current !== activeTab) {
       window.history.pushState({ tab: activeTab }, "");
       prevTabRef.current = activeTab;
+      setBackOverride(null);
     }
   }, [activeTab]);
 
-  // Handle Android hardware back button
   useEffect(() => {
     const onPop = (e) => {
       if (open) { setOpen(false); window.history.pushState({ tab: activeTab }, ""); return; }
+      if (backOverride) { backOverride(); window.history.pushState({ tab: activeTab }, ""); return; }
       const prevTab = e.state?.tab;
       if (prevTab && prevTab !== activeTab) {
         setActiveTab(prevTab);
@@ -1924,11 +1939,16 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
         setActiveTab(defaultTab);
         window.history.pushState({ tab: defaultTab }, "");
       }
-      // already on default tab — let browser handle (exits app correctly)
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
-  }, [activeTab, open, defaultTab]);
+  }, [activeTab, open, defaultTab, backOverride]);
+
+  const handleBack = () => {
+    if (backOverride) { backOverride(); return; }
+    setActiveTab(defaultTab);
+    window.history.pushState({ tab: defaultTab }, "");
+  };
 
   return (
     <div style={{ minHeight:"100vh", background:"#eef2ff", fontFamily:"'Segoe UI',sans-serif", maxWidth:"100vw", overflowX:"hidden" }}>
@@ -1937,7 +1957,7 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
       <div style={{ background: grad, padding:"0 16px", height:62, display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100, boxShadow:"0 4px 24px #00000040" }}>
         {/* Back button — shown on all non-default tabs */}
         {activeTab !== defaultTab
-          ? <button onClick={()=>{ setActiveTab(defaultTab); window.history.pushState({tab:defaultTab},""); }} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:"#fff", fontSize:18, fontWeight:900 }}>←</button>
+          ? <button onClick={handleBack} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, color:"#fff", fontSize:18, fontWeight:900 }}>←</button>
           : <button onClick={() => setOpen(true)} style={{ background:"#ffffff18", border:"1px solid #ffffff25", borderRadius:12, width:42, height:42, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:5, flexShrink:0 }}>
               <div style={{ width:18, height:2, background:"#fff", borderRadius:2 }}/>
               <div style={{ width:14, height:2, background:"#ffffffaa", borderRadius:2 }}/>
@@ -2018,7 +2038,11 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
             <div style={{ fontSize:48, marginBottom:12, opacity:0.4 }}>{"⏳"}</div>
             <div style={{ color:"#94a3b8", fontWeight:600, fontSize:14 }}>Loading…</div>
           </div>
-        ) : children}
+        ) : (
+          <BackOverrideContext.Provider value={{ setOverride: setBackOverride }}>
+            {children}
+          </BackOverrideContext.Provider>
+        )}
       </div>
     </div>
   );
@@ -2038,6 +2062,7 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
   const [summaryData, setSummaryData]     = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [subView, setSubView]             = useState('mark');
+  useBackOverride(()=>{ setSubView('mark'); }, subView === 'summary');
   const [datePage, setDatePage]           = useState(1);
   const [studentPage, setStudentPage]     = useState(1);
   const DATE_PAGE_SIZE    = 15;
