@@ -1,43 +1,32 @@
 import { createClient } from '@supabase/supabase-js';
 import { offlineDB } from './offlineDB';
 import { enqueue, readCache } from './syncEngine';
+import * as Sentry from '@sentry/react';
 
 const supabaseUrl     = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Stored in memory — set on login, cleared on logout
 let _userId   = null;
 let _schoolId = null;
 
 export function setUserContext(userId, schoolId) {
-  _userId   = userId;
-  _schoolId = schoolId;
+  _userId = userId; _schoolId = schoolId;
 }
 
 export function clearUserContext() {
-  _userId   = null;
-  _schoolId = null;
+  _userId = null; _schoolId = null;
 }
 
-// Called on login — sets context both in memory and in Supabase session
 export async function activateUserContext(userId) {
   try {
-    const { data } = await supabase
-      .from('users')
-      .select('id, school_id')
-      .eq('id', userId)
-      .single();
-    if (data) {
-      _userId   = data.id;
-      _schoolId = data.school_id;
-    }
+    const { data } = await supabase.from('users').select('id,school_id').eq('id', userId).single();
+    if (data) { _userId = data.id; _schoolId = data.school_id; }
     await supabase.rpc('set_user_context', { uid: userId });
   } catch (e) {}
 }
 
-// Ensures RLS context is set before any sensitive operation
 async function ensureContext() {
   if (!_userId) return;
   try { await supabase.rpc('set_user_context', { uid: _userId }); } catch (e) {}
@@ -69,20 +58,16 @@ export const db = {
     }
     const { data, error } = await query;
     if (error) {
-      if (cacheTable) {
-        try { return await readCache(cacheTable, filters); } catch (e) {}
-      }
+      if (cacheTable) { try { return await readCache(cacheTable, filters); } catch (e) {} }
       return [];
     }
-    if (data && cacheTable) {
-      try { await offlineDB[cacheTable].bulkPut(data); } catch (e) {}
-    }
+    if (data && cacheTable) { try { await offlineDB[cacheTable].bulkPut(data); } catch (e) {} }
     return data || [];
   },
 
   post: async (table, payload) => {
     if (!navigator.onLine && QUEUEABLE.includes(table)) {
-      const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
       const record = { ...payload, id: tempId, _offline: true };
       const cacheTable = CACHEABLE[table];
       if (cacheTable) { try { await offlineDB[cacheTable].put(record); } catch (e) {} }
@@ -93,7 +78,7 @@ export const db = {
     const { data, error } = await supabase.from(table).insert(payload).select().single();
     if (error) {
       if (QUEUEABLE.includes(table)) {
-        const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
         const record = { ...payload, id: tempId, _offline: true };
         const cacheTable = CACHEABLE[table];
         if (cacheTable) { try { await offlineDB[cacheTable].put(record); } catch (e) {} }
@@ -101,6 +86,7 @@ export const db = {
         return record;
       }
       console.error('db.post error:', error.message, table);
+      Sentry.captureException(new Error(`db.post [${table}]: ${error.message}`));
       return null;
     }
     const cacheTable = CACHEABLE[table];
@@ -126,6 +112,7 @@ export const db = {
         return full;
       }
       console.error('db.patch error:', error.message, table);
+      Sentry.captureException(new Error(`db.patch [${table}]: ${error.message}`));
       return null;
     }
     const cacheTable = CACHEABLE[table];
@@ -151,6 +138,7 @@ export const db = {
         return payload;
       }
       console.error('db.upsert error:', error.message, table);
+      Sentry.captureException(new Error(`db.upsert [${table}]: ${error.message}`));
       return null;
     }
     const cacheTable = CACHEABLE[table];
@@ -161,7 +149,10 @@ export const db = {
   delete: async (table, id) => {
     await ensureContext();
     const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) console.error('db.delete error:', error.message);
+    if (error) {
+      console.error('db.delete error:', error.message);
+      Sentry.captureException(new Error(`db.delete [${table}]: ${error.message}`));
+    }
     const cacheTable = CACHEABLE[table];
     if (cacheTable) { try { await offlineDB[cacheTable].delete(id); } catch (e) {} }
   },
