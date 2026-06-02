@@ -1,9 +1,68 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import * as Sentry from '@sentry/react';
 import App from './App';
 
+Sentry.init({
+  dsn: process.env.REACT_APP_SENTRY_DSN,
+  environment: process.env.NODE_ENV,
+  release: process.env.REACT_APP_VERSION || '1.0.0',
+  integrations: [
+    Sentry.browserTracingIntegration(),
+    Sentry.replayIntegration({
+      maskAllText: true,
+      blockAllMedia: true,
+    }),
+  ],
+  tracesSampleRate: 0.2,
+  replaysSessionSampleRate: 0.05,
+  replaysOnErrorSampleRate: 1.0,
+  beforeSend(event) {
+    if (event.exception) {
+      const err = event.exception.values?.[0];
+      const msg = err?.value || '';
+      // Ignore non-critical noise
+      if (
+        msg.includes('ResizeObserver') ||
+        msg.includes('Network request failed') ||
+        msg.includes('Load failed')
+      ) return null;
+    }
+    return event;
+  },
+});
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+root.render(
+  <Sentry.ErrorBoundary
+    fallback={({ error, resetError }) => (
+      <div style={{
+        minHeight: '100vh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        background: '#f8fafc', padding: 24, textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+        <div style={{ fontWeight: 900, fontSize: 18, color: '#1e293b', marginBottom: 8 }}>
+          Something went wrong
+        </div>
+        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, maxWidth: 300 }}>
+          This error has been reported automatically. Please try again.
+        </div>
+        <button
+          onClick={resetError}
+          style={{
+            background: '#1e3a8a', color: '#fff', border: 'none',
+            borderRadius: 10, padding: '12px 28px', fontSize: 14,
+            fontWeight: 700, cursor: 'pointer',
+          }}>
+          Try Again
+        </button>
+      </div>
+    )}
+  >
+    <App />
+  </Sentry.ErrorBoundary>
+);
 
 requestAnimationFrame(() => {
   setTimeout(() => { if (window.__hideSplash) window.__hideSplash(); }, 400);
@@ -22,11 +81,13 @@ if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
             }
           });
         });
-
         navigator.serviceWorker.addEventListener('controllerchange', () => {
           window.location.reload();
         });
       })
-      .catch(err => console.error('[SW] Registration failed:', err));
+      .catch(err => {
+        Sentry.captureException(err);
+        console.error('[SW] Registration failed:', err);
+      });
   });
 }
