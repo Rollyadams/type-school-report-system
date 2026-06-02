@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { db, supabase, activateUserContext } from './supabaseClient';
+import { db, supabase, activateUserContext, clearUserContext } from './supabaseClient';
 import { useSyncEngine, retryFailed } from './syncEngine';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
@@ -4078,6 +4078,7 @@ export default function App() {
   } else { setScreen("login"); } };
 
   const handleLogout=useCallback(()=>{
+    clearUserContext();
     sessionStorage.removeItem("school_user");
     localStorage.removeItem(LAST_ACTIVE_KEY);
     setUser(null); setScreen("login"); setShowTimeoutWarning(false);
