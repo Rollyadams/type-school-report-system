@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, supabase, activateUserContext, clearUserContext } from './supabaseClient';
 import { useSyncEngine, retryFailed } from './syncEngine';
+import * as Sentry from '@sentry/react';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
@@ -2193,19 +2194,21 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
     for (const student of classStudents) {
       const status = records[student.id] || 'absent';
       const payload = {
-        class_id: selectedClass,
+        class_id:  selectedClass,
         student_id: student.id,
-        date: selectedDate,
+        date:      selectedDate,
         status,
         school_id: user.school_id,
         marked_by: user.id,
       };
       const existingId = existingIds[student.id];
       if (existingId) {
-        await supabase.from('daily_attendance').update({ status }).eq('id', existingId);
+        await db.patch('daily_attendance', existingId, { status });
       } else {
-        const { data } = await supabase.from('daily_attendance').insert(payload).select().single();
-        if (data) setExistingIds(p => ({ ...p, [student.id]: data.id }));
+        const data = await db.post('daily_attendance', payload);
+        if (data?.id && !data._offline) {
+          setExistingIds(p => ({ ...p, [student.id]: data.id }));
+        }
       }
     }
     setSaving(false);
@@ -3031,20 +3034,31 @@ function Timetable({ user, classes, school, isPrincipal }) {
   const saveTimetable = async () => {
     if (!selectedClass) return;
     setSaving(true);
-    const { data: existing } = await supabase.from("timetable").select("id").eq("class_id", selectedClass).single();
     const payload = {
-      class_id:  selectedClass,
-      school_id: school?.id || user.school_id,
-      periods:   JSON.stringify(periods),
-      slots:     JSON.stringify(timetable),
+      class_id:   selectedClass,
+      school_id:  school?.id || user.school_id,
+      periods:    JSON.stringify(periods),
+      slots:      JSON.stringify(timetable),
       updated_at: new Date().toISOString(),
     };
-    if (existing?.id) {
-      await supabase.from("timetable").update(payload).eq("id", existing.id);
-    } else {
-      await supabase.from("timetable").insert(payload);
+    try {
+      if (navigator.onLine) {
+        const { data: existing } = await supabase.from("timetable").select("id").eq("class_id", selectedClass).single();
+        if (existing?.id) {
+          await db.patch("timetable", existing.id, payload);
+        } else {
+          await db.post("timetable", payload);
+        }
+      } else {
+        // Offline — save to Dexie cache, queue upsert
+        await db.upsert("timetable", { ...payload, id: `timetable_${selectedClass}` }, "class_id");
+      }
+      setSaved(true);
+    } catch (e) {
+      Sentry.captureException(e);
+      alert("Failed to save timetable. Please try again.");
     }
-    setSaving(false); setSaved(true);
+    setSaving(false);
   };
 
   const printTimetable = () => {
@@ -4070,15 +4084,18 @@ export default function App() {
   const handleLogin=(u)=>{
     sessionStorage.setItem("school_user", JSON.stringify(u));
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
+    Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
   };
-  const handleRegistered=(u)=>{ if(u){ 
+  const handleRegistered=(u)=>{ if(u){
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
-    setUser(u); setScreen("app"); 
+    Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
+    setUser(u); setScreen("app");
   } else { setScreen("login"); } };
 
   const handleLogout=useCallback(()=>{
     clearUserContext();
+    Sentry.setUser(null);
     sessionStorage.removeItem("school_user");
     localStorage.removeItem(LAST_ACTIVE_KEY);
     setUser(null); setScreen("login"); setShowTimeoutWarning(false);
