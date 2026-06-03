@@ -39,9 +39,11 @@ const CACHEABLE = {
   results:          'results_cache',
   attendance:       'attendance_cache',
   daily_attendance: 'daily_att_cache',
+  timetable:        'timetable_cache',
+  remarks:          'remarks_cache',
 };
 
-const QUEUEABLE = ['results', 'attendance', 'daily_attendance'];
+const QUEUEABLE = ['results', 'attendance', 'daily_attendance', 'timetable', 'remarks'];
 
 export const db = {
   get: async (table, filters = null) => {
