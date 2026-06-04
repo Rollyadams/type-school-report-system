@@ -834,6 +834,275 @@ function PromoteStudents({ students, classes, terms, reload }) {
 }
 
 // ── Manage Students ────────────────────────────────────────────
+// ── CSV/Excel Import ──────────────────────────────────────────
+function StudentImport({ classes, schoolId, school, onDone }) {
+  const [step, setStep]           = useState('upload'); // upload | preview | importing | done
+  const [rows, setRows]           = useState([]);
+  const [errors, setErrors]       = useState([]);
+  const [mapping, setMapping]     = useState({});
+  const [headers, setHeaders]     = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress]   = useState(0);
+  const [imported, setImported]   = useState(0);
+  const fileRef                   = useRef(null);
+
+  const REQUIRED_FIELDS = [
+    { key:'full_name',      label:'Full Name',          required:true  },
+    { key:'class_name',     label:'Class (e.g. JSS 1)', required:true  },
+    { key:'admission_number',label:'Admission No',      required:false },
+    { key:'gender',         label:'Gender',             required:false },
+    { key:'date_of_birth',  label:'Date of Birth',      required:false },
+    { key:'guardian_name',  label:'Guardian Name',      required:false },
+    { key:'guardian_phone', label:'Guardian Phone',     required:false },
+  ];
+
+  const parseCSV = (text) => {
+    const lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return { headers:[], rows:[] };
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''));
+    const rows = lines.slice(1).map(line => {
+      const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g,''));
+      const row = {};
+      headers.forEach((h,i) => { row[h] = cols[i] || ''; });
+      return row;
+    }).filter(r => Object.values(r).some(v => v));
+    return { headers, rows };
+  };
+
+  const autoMap = (headers) => {
+    const map = {};
+    const normalize = s => s.toLowerCase().replace(/[^a-z]/g,'');
+    REQUIRED_FIELDS.forEach(f => {
+      const match = headers.find(h => {
+        const n = normalize(h);
+        if (f.key === 'full_name')       return n.includes('name') && !n.includes('guardian') && !n.includes('parent');
+        if (f.key === 'class_name')      return n.includes('class') || n.includes('arm');
+        if (f.key === 'admission_number')return n.includes('adm') || n.includes('reg') || n.includes('id');
+        if (f.key === 'gender')          return n.includes('gender') || n.includes('sex');
+        if (f.key === 'date_of_birth')   return n.includes('dob') || n.includes('birth') || n.includes('date');
+        if (f.key === 'guardian_name')   return (n.includes('guardian')||n.includes('parent'))&&n.includes('name');
+        if (f.key === 'guardian_phone')  return (n.includes('guardian')||n.includes('parent'))&&(n.includes('phone')||n.includes('tel'));
+        return false;
+      });
+      if (match) map[f.key] = match;
+    });
+    return map;
+  };
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target.result;
+      const { headers, rows } = parseCSV(text);
+      if (!headers.length) { alert('Could not read file. Make sure it is a CSV file.'); return; }
+      setHeaders(headers);
+      setRows(rows);
+      setMapping(autoMap(headers));
+      setStep('preview');
+    };
+    reader.readAsText(file);
+  };
+
+  const resolveClass = (className) => {
+    if (!className) return null;
+    const norm = className.toLowerCase().trim();
+    return classes.find(c => {
+      const full = `${c.name} ${c.arm||''}`.toLowerCase().trim();
+      const nameOnly = c.name.toLowerCase().trim();
+      return full === norm || nameOnly === norm ||
+        full.replace(/\s/g,'') === norm.replace(/\s/g,'') ||
+        norm.includes(nameOnly);
+    });
+  };
+
+  const validateRows = () => {
+    const errs = [];
+    rows.forEach((row, i) => {
+      const name = row[mapping.full_name]?.trim();
+      const cls  = row[mapping.class_name]?.trim();
+      if (!name) errs.push(`Row ${i+2}: Missing student name`);
+      if (!cls)  errs.push(`Row ${i+2}: Missing class`);
+      else if (!resolveClass(cls)) errs.push(`Row ${i+2}: Class "${cls}" not found — create it first`);
+    });
+    return errs;
+  };
+
+  const genAdmNo = (index) => {
+    const initials = school?.name
+      ? school.name.split(' ').filter(w=>w.length>1).map(w=>w[0].toUpperCase()).join('').slice(0,4)
+      : 'SCH';
+    const year = new Date().getFullYear();
+    return `${initials}/${year}/${String(index).padStart(4,'0')}`;
+  };
+
+  const runImport = async () => {
+    const errs = validateRows();
+    if (errs.length) { setErrors(errs); return; }
+    setErrors([]);
+    setImporting(true);
+    setStep('importing');
+    let count = 0;
+    const startIdx = students?.length || 0;
+    for (const row of rows) {
+      const cls = resolveClass(row[mapping.class_name]?.trim());
+      const admNo = row[mapping.admission_number]?.trim() || genAdmNo(startIdx + count + 1);
+      await db.post('students', {
+        full_name:        sanitize(row[mapping.full_name]?.trim() || ''),
+        admission_number: admNo,
+        gender:           row[mapping.gender]?.trim() || '',
+        date_of_birth:    row[mapping.date_of_birth]?.trim() || '',
+        guardian_name:    sanitize(row[mapping.guardian_name]?.trim() || ''),
+        guardian_phone:   row[mapping.guardian_phone]?.trim() || '',
+        class_id:         cls?.id || null,
+        school_id:        schoolId,
+      });
+      count++;
+      setProgress(Math.round((count / rows.length) * 100));
+      setImported(count);
+    }
+    setImporting(false);
+    setStep('done');
+    onDone();
+  };
+
+  // ── Download template
+  const downloadTemplate = () => {
+    const csv = [
+      'Full Name,Class,Admission No,Gender,Date of Birth,Guardian Name,Guardian Phone',
+      'Chika Okafor,JSS 1 A,SCH/2025/0001,Male,2012-03-15,Mr Okafor,08012345678',
+      'Amina Bello,JSS 1 B,,Female,2013-07-22,Mrs Bello,09087654321',
+    ].join('\n');
+    const blob = new Blob([csv], { type:'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'student_import_template.csv';
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div>
+      <div style={S.section('#6366f1')}><span>📥</span><span style={{fontWeight:800,color:'#6366f1'}}>Import Students</span></div>
+
+      {step === 'upload' && (
+        <>
+          <div style={{...S.card,textAlign:'center',padding:32,border:'2px dashed #6366f1',background:'#fafafa'}}>
+            <div style={{fontSize:40,marginBottom:12}}>📊</div>
+            <div style={{fontWeight:800,color:'#1e293b',fontSize:15,marginBottom:6}}>Upload Student List</div>
+            <div style={{fontSize:13,color:'#64748b',marginBottom:20}}>Upload a CSV file with your student data. Download the template below to get started.</div>
+            <input ref={fileRef} type="file" accept=".csv,.txt" style={{display:'none'}} onChange={e=>handleFile(e.target.files[0])}/>
+            <button onClick={()=>fileRef.current.click()} style={{...S.btn('#6366f1'),padding:'12px 28px',fontSize:14,marginBottom:12,width:'100%'}}>
+              📂 Choose CSV File
+            </button>
+            <button onClick={downloadTemplate} style={{...S.btn('#e2e8f0'),color:'#6366f1',padding:'10px 20px',fontSize:13,width:'100%'}}>
+              ⬇️ Download Template
+            </button>
+          </div>
+          <div style={{...S.card,marginTop:12}}>
+            <div style={{fontWeight:700,color:'#1e293b',fontSize:13,marginBottom:8}}>How to import:</div>
+            {['Download the template above','Fill in your student data in Excel or Google Sheets','Export/Save as CSV','Upload the CSV file here'].map((s,i)=>(
+              <div key={i} style={{display:'flex',gap:10,alignItems:'center',padding:'6px 0',fontSize:13,color:'#64748b'}}>
+                <div style={{width:22,height:22,borderRadius:'50%',background:'#6366f1',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800,flexShrink:0}}>{i+1}</div>
+                {s}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {step === 'preview' && (
+        <>
+          <div style={{...S.card,background:'#f0fdf4',border:'1.5px solid #10b981',marginBottom:16}}>
+            <div style={{fontWeight:700,color:'#059669',fontSize:13}}>✅ {rows.length} students found in file</div>
+            <div style={{fontSize:12,color:'#64748b',marginTop:2}}>Review the column mapping below then tap Import.</div>
+          </div>
+
+          {/* Column mapping */}
+          <div style={S.card}>
+            <div style={{fontWeight:800,color:'#1e293b',fontSize:13,marginBottom:12}}>Column Mapping</div>
+            {REQUIRED_FIELDS.map(f=>(
+              <div key={f.key} style={{marginBottom:10}}>
+                <label style={S.label}>{f.label}{f.required&&<span style={{color:'#ef4444'}}> *</span>}</label>
+                <select style={S.input} value={mapping[f.key]||''} onChange={e=>setMapping(p=>({...p,[f.key]:e.target.value}))}>
+                  <option value=''>— Not mapped —</option>
+                  {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+
+          {/* Preview table */}
+          <div style={{...S.card,padding:0,overflow:'hidden',marginBottom:16}}>
+            <div style={{padding:'12px 16px',fontWeight:800,color:'#1e293b',borderBottom:'1px solid #f1f5f9',fontSize:13}}>
+              Preview (first 5 rows)
+            </div>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+                <thead>
+                  <tr style={{background:'#f8fafc'}}>
+                    {['Name','Class','Adm No','Gender','Guardian'].map(h=>(
+                      <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:700,color:'#64748b',fontSize:10,textTransform:'uppercase'}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0,5).map((row,i)=>{
+                    const cls = resolveClass(row[mapping.class_name]?.trim());
+                    return (
+                      <tr key={i} style={{borderTop:'1px solid #f1f5f9',background:i%2===0?'#fff':'#fafafa'}}>
+                        <td style={{padding:'8px 10px',fontWeight:600,color:'#374151'}}>{row[mapping.full_name]||'—'}</td>
+                        <td style={{padding:'8px 10px',color:cls?'#10b981':'#ef4444',fontWeight:600}}>{row[mapping.class_name]||'—'}{!cls&&row[mapping.class_name]?' ⚠️':''}</td>
+                        <td style={{padding:'8px 10px',color:'#64748b'}}>{row[mapping.admission_number]||'auto'}</td>
+                        <td style={{padding:'8px 10px',color:'#64748b'}}>{row[mapping.gender]||'—'}</td>
+                        <td style={{padding:'8px 10px',color:'#64748b'}}>{row[mapping.guardian_name]||'—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {rows.length > 5 && <div style={{padding:'8px 16px',fontSize:11,color:'#94a3b8',textAlign:'center'}}>+{rows.length-5} more rows</div>}
+          </div>
+
+          {errors.length > 0 && (
+            <div style={{...S.card,background:'#fef2f2',border:'1.5px solid #ef4444',marginBottom:16}}>
+              <div style={{fontWeight:800,color:'#ef4444',marginBottom:8,fontSize:13}}>⚠️ Fix these errors first:</div>
+              {errors.slice(0,5).map((e,i)=><div key={i} style={{fontSize:12,color:'#ef4444',marginBottom:4}}>• {e}</div>)}
+              {errors.length>5&&<div style={{fontSize:12,color:'#94a3b8'}}>+{errors.length-5} more errors</div>}
+            </div>
+          )}
+
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>{setStep('upload');setRows([]);setErrors([]);}} style={{...S.btn('#e2e8f0'),color:'#64748b',flex:1,padding:12,fontSize:13}}>← Back</button>
+            <button onClick={runImport} style={{...S.btn('#6366f1'),flex:2,padding:12,fontSize:14}}>Import {rows.length} Students →</button>
+          </div>
+        </>
+      )}
+
+      {step === 'importing' && (
+        <div style={{...S.card,textAlign:'center',padding:40}}>
+          <div style={{fontSize:36,marginBottom:16}}>⏳</div>
+          <div style={{fontWeight:800,color:'#1e293b',fontSize:15,marginBottom:8}}>Importing students…</div>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:20}}>{imported} of {rows.length} imported</div>
+          <div style={{background:'#e2e8f0',borderRadius:99,height:10,overflow:'hidden',marginBottom:8}}>
+            <div style={{height:'100%',width:`${progress}%`,background:'linear-gradient(90deg,#6366f1,#10b981)',borderRadius:99,transition:'width 0.3s'}}/>
+          </div>
+          <div style={{fontSize:12,color:'#6366f1',fontWeight:700}}>{progress}%</div>
+        </div>
+      )}
+
+      {step === 'done' && (
+        <div style={{...S.card,textAlign:'center',padding:40}}>
+          <div style={{fontSize:48,marginBottom:12}}>🎉</div>
+          <div style={{fontWeight:900,color:'#059669',fontSize:18,marginBottom:8}}>{imported} Students Imported!</div>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:24}}>All students have been added to the system successfully.</div>
+          <button onClick={onDone} style={{...S.btn('#6366f1'),padding:'12px 32px',fontSize:14}}>View Students →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ManageStudents({ students, classes, reload, schoolId, school, planInfo, onUpgrade }) {
   const genAdmNumber = () => {
     const initials = school && school.name
@@ -847,8 +1116,9 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
   const [adding,setAdding]=useState(false); const [search,setSearch]=useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [saving,setSaving]=useState(false); const [editId,setEditId]=useState(null);
+  const [importing,setImporting]=useState(false);
   const resetForm=()=>setForm({full_name:"",admission_number:"",gender:"",date_of_birth:"",guardian_name:"",guardian_phone:"",class_id:""});
-  useBackOverride(()=>{ resetForm(); setEditId(null); setAdding(false); }, adding);
+  useBackOverride(()=>{ if(importing){setImporting(false);return;} resetForm(); setEditId(null); setAdding(false); }, adding||importing);
   const save=async()=>{
     if(!form.full_name.trim()){alert("Student name required");return;}
     if(!form.class_id){alert("Please select a class");return;}
@@ -892,10 +1162,24 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
   const { paginated:pageStudents, page, setPage, totalPages, total } = usePagination(filtered, 20);
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <div style={S.section()}><span>👨‍🎓</span><span style={{fontWeight:800,color:"#6366f1"}}>Students ({students.length})</span></div>
-        <button onClick={()=>{if(adding){resetForm();setEditId(null);}setAdding(!adding);}} style={S.btn()}>{adding?"Cancel":"+ Add Student"}</button>
-      </div>
+      {importing && (
+        <StudentImport
+          classes={classes}
+          schoolId={schoolId}
+          school={school}
+          students={students}
+          onDone={()=>{ setImporting(false); reload(); }}
+        />
+      )}
+      {!importing && (
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <div style={S.section()}><span>👨‍🎓</span><span style={{fontWeight:800,color:"#6366f1"}}>Students ({students.length})</span></div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setImporting(true)} style={{...S.btn('#6366f1'),padding:"8px 12px",fontSize:12}}>📥 Import</button>
+              <button onClick={()=>{if(adding){resetForm();setEditId(null);}setAdding(!adding);}} style={S.btn()}>{adding?"Cancel":"+ Add"}</button>
+            </div>
+          </div>
       {adding&&(
         <div style={S.card}>
           <div style={{fontWeight:800,color:"#1e293b",marginBottom:16}}>{editId?"Edit Student":"New Student"}</div>
@@ -934,6 +1218,8 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
         );
       })}
       <Pagination page={page} totalPages={totalPages} setPage={setPage} total={total} pageSize={20}/>
+        </>
+      )}
     </div>
   );
 }
