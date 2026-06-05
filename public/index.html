@@ -4,26 +4,26 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-    <meta name="theme-color" content="#1e3a8a" />
+    <meta name="theme-color" content="#0a3d24" />
     <link rel="manifest" href="/manifest.json" />
 
     <!-- iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="School Report System" />
+    <meta name="apple-mobile-web-app-title" content="School Resource Center" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="apple-touch-startup-image" href="/icons/icon-512.png" />
 
     <!-- Android / general -->
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="application-name" content="SchoolApp" />
+    <meta name="application-name" content="SRC" />
     <meta name="description" content="AI-powered attendance and school management for West African schools" />
     <meta name="format-detection" content="telephone=no" />
-    <meta name="msapplication-TileColor" content="#1e3a8a" />
+    <meta name="msapplication-TileColor" content="#0a3d24" />
     <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
 
     <link rel="icon" href="/icons/icon-96.png" />
-    <title>School Report System</title>
+    <title>School Resource Center</title>
 
     <style>
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -37,7 +37,7 @@
 
       #splash {
         position: fixed; inset: 0;
-        background: linear-gradient(145deg, #1e3a8a 0%, #312e81 60%, #4338ca 100%);
+        background: linear-gradient(145deg, #0a3d24 0%, #145232 60%, #1a6b3f 100%);
         display: flex; flex-direction: column;
         align-items: center; justify-content: center;
         z-index: 9999;
@@ -46,9 +46,9 @@
       #splash.hidden { opacity: 0; pointer-events: none; }
       #splash-icon { font-size: 72px; margin-bottom: 20px; animation: pop 0.4s ease; }
       #splash-title { color: #fff; font-size: 26px; font-weight: 900; letter-spacing: 0.01em; }
-      #splash-sub { color: #a5b4fc; font-size: 13px; margin-top: 8px; font-weight: 500; }
+      #splash-sub { color: #86efac; font-size: 13px; margin-top: 8px; font-weight: 500; }
       #splash-bar-wrap { width: 120px; height: 3px; background: #ffffff20; border-radius: 99px; margin-top: 40px; overflow: hidden; }
-      #splash-bar { height: 100%; width: 0%; background: #818cf8; border-radius: 99px; animation: load 1.2s ease forwards; }
+      #splash-bar { height: 100%; width: 0%; background: #4ade80; border-radius: 99px; animation: load 1.2s ease forwards; }
 
       @keyframes pop {
         0%   { transform: scale(0.6); opacity: 0; }
@@ -83,7 +83,7 @@
   <body>
     <div id="splash">
       <div id="splash-icon">🎓</div>
-      <div id="splash-title">School Report System</div>
+      <div id="splash-title">School Resource Center</div>
       <div id="splash-sub">Academic Report Management</div>
       <div id="splash-bar-wrap"><div id="splash-bar"></div></div>
     </div>
