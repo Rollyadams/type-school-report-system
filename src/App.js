@@ -503,15 +503,18 @@ function Login({ onLogin, onRegister }) {
   if(parentData) return <ParentResultView data={parentData} onBack={()=>setParentData(null)} />;
 
   return (
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1e3a8a,#6366f1)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0a3d24,#1a6b3f)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{background:"#fff",borderRadius:24,padding:36,width:"100%",maxWidth:400,boxShadow:"0 20px 60px #0000003a"}}>
         <div style={{textAlign:"center",marginBottom:24}}>
-          <div style={{fontSize:48,marginBottom:8}}>🎓</div>
-          <h1 style={{margin:0,fontSize:20,fontWeight:900,color:"#1e3a8a"}}>School Report System</h1>
+          <div style={{width:64,height:64,borderRadius:16,background:"#0a3d24",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",boxShadow:"0 4px 16px #0a3d2440"}}>
+            <span style={{color:"#fff",fontWeight:900,fontSize:20,letterSpacing:1}}>SRC</span>
+          </div>
+          <h1 style={{margin:0,fontSize:18,fontWeight:900,color:"#0a3d24"}}>School Resource Center</h1>
+          <p style={{margin:"4px 0 0",fontSize:12,color:"#64748b"}}>School management platform</p>
         </div>
         <div style={{display:"flex",gap:8,marginBottom:20}}>
           {[["staff","👩‍🏫 Staff Login"],["parent","👨‍👩‍👧 Check Result"]].map(([m,l])=>(
-            <button key={m} onClick={()=>setMode(m)} style={{flex:1,padding:"10px",border:"none",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",background:mode===m?"#1e3a8a":"#f1f5f9",color:mode===m?"#fff":"#64748b"}}>{l}</button>
+            <button key={m} onClick={()=>setMode(m)} style={{flex:1,padding:"10px",border:"none",borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",background:mode===m?"#0a3d24":"#f1f5f9",color:mode===m?"#fff":"#64748b"}}>{l}</button>
           ))}
         </div>
         {mode==="staff"?(
@@ -2120,7 +2123,7 @@ function InstallBanner() {
             <button onClick={handleDismiss} style={{background:'#ffffff25',border:'none',color:'#fff',borderRadius:6,width:24,height:24,cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center'}}>✕</button>
           </div>
           <div style={{fontSize:11,color:'#a5b4fc',marginBottom:12,lineHeight:1.5}}>
-            Install School Report System on your home screen for faster access and offline use.
+            Install School Resource Center on your home screen for faster access and offline use.
           </div>
           <button onClick={handleInstall}
             style={{background:'#6366f1',border:'none',color:'#fff',borderRadius:10,padding:'10px',width:'100%',fontWeight:800,fontSize:13,cursor:'pointer'}}>
