@@ -86,8 +86,8 @@ if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
         });
       })
       .catch(err => {
-        Sentry.captureException(err);
-        console.error('[SW] Registration failed:', err);
+        // SW registration failure is non-critical — don't alert Sentry
+        console.warn('[SW] Registration failed:', err);
       });
   });
 }
