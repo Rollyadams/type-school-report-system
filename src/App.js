@@ -64,6 +64,7 @@ function Pagination({ page, totalPages, setPage, total, pageSize }) {
 const NIGERIAN_SUBJECTS = {
   "Creche":  ["Number Work","Letter Work","Rhymes","Colouring","Show & Tell","Physical Activity"],
   "Beginner":  ["Number Work","Letter Work","Rhymes","Colouring","Show & Tell","Physical Activity"],
+  "Kindergarten":  ["English Language","Number Work","Phonics","Rhymes","Creative Activity","CRS/IRS","Physical & Health Education"],
   "Nursery":  ["English Language","Number Work","Phonics","Rhymes","Creative Activity","CRS/IRS","Physical & Health Education"],
   "Basic 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Basic 2":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
@@ -91,7 +92,7 @@ const NIGERIAN_SUBJECTS = {
 };
 
 const CLASS_ORDER = [
-  "Creche","Beginner","Nursery",
+  "Creche","Beginner","Kindergarten","Nursery",
   "Basic 1","Basic 2","Basic 3","Basic 4","Basic 5",
   "Primary 1","Primary 2","Primary 3","Primary 4","Primary 5","Primary 6",
   "JSS 1","JSS 2","JSS 3",
