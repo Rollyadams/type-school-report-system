@@ -29,7 +29,16 @@ export async function activateUserContext(userId) {
 
 async function ensureContext() {
   if (!_userId) return;
-  try { await supabase.rpc('set_user_context', { uid: _userId }); } catch (e) {}
+  try {
+    await Promise.race([
+      supabase.rpc('set_user_context', { uid: _userId }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('ensureContext timeout')), 5000)),
+    ]);
+  } catch (e) {
+    // Non-fatal: if context-setting hangs or fails, proceed anyway —
+    // RLS will simply reject the query below if context wasn't set,
+    // which db.post/get already handle as a normal error case.
+  }
 }
 
 const CACHEABLE = {
@@ -77,7 +86,16 @@ export const db = {
       return record;
     }
     await ensureContext();
-    const { data, error } = await supabase.from(table).insert(payload).select().single();
+    let data, error;
+    try {
+      const result = await Promise.race([
+        supabase.from(table).insert(payload).select().single(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('db.post network timeout')), 10000)),
+      ]);
+      data = result.data; error = result.error;
+    } catch (e) {
+      error = e;
+    }
     if (error) {
       if (QUEUEABLE.includes(table)) {
         const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
