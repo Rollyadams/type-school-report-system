@@ -1,4 +1,4 @@
-const CACHE_VERSION  = 'v4';
+const CACHE_VERSION  = 'v5';
 const SHELL_CACHE    = `src-shell-${CACHE_VERSION}`;
 const API_CACHE      = `src-api-${CACHE_VERSION}`;
 const CDN_CACHE      = `src-cdn-${CACHE_VERSION}`;
