@@ -72,6 +72,10 @@ if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
       .then(reg => {
+        // Check for a new SW version on every load, so a stale tab left
+        // open in the background still picks up fixes promptly.
+        reg.update().catch(() => {});
+
         reg.addEventListener('updatefound', () => {
           const nw = reg.installing;
           if (!nw) return;
@@ -81,6 +85,15 @@ if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
             }
           });
         });
+
+        window.__applyUpdate = function() {
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          } else {
+            window.location.reload();
+          }
+        };
+
         navigator.serviceWorker.addEventListener('controllerchange', () => {
           window.location.reload();
         });
