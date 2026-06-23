@@ -859,6 +859,8 @@ function StudentImport({ classes, schoolId, school, onDone }) {
   const [progress, setProgress]   = useState(0);
   const [imported, setImported]   = useState(0);
   const [reading, setReading]     = useState(false);
+  const [showAllRows, setShowAllRows]     = useState(false);
+  const [showAllErrors, setShowAllErrors] = useState(false);
   const fileRef                   = useRef(null);
 
   const REQUIRED_FIELDS = [
@@ -981,31 +983,48 @@ function StudentImport({ classes, schoolId, school, onDone }) {
     return `${initials}/${year}/${String(index).padStart(4,'0')}`;
   };
 
+  const [failed, setFailed] = useState([]);
+
+  const withTimeout = (promise, ms) => Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+
   const runImport = async () => {
     const errs = validateRows();
     if (errs.length) { setErrors(errs); return; }
     setErrors([]);
+    setFailed([]);
     setImporting(true);
     setStep('importing');
     let count = 0;
+    let failCount = 0;
+    const failedRows = [];
     const startIdx = students?.length || 0;
     for (const row of rows) {
       const cls = resolveClass(row[mapping.class_name]?.trim());
       const admNo = row[mapping.admission_number]?.trim() || genAdmNo(startIdx + count + 1);
-      await db.post('students', {
-        full_name:        sanitize(row[mapping.full_name]?.trim() || ''),
-        admission_number: admNo,
-        gender:           row[mapping.gender]?.trim() || '',
-        date_of_birth:    row[mapping.date_of_birth]?.trim() || '',
-        guardian_name:    sanitize(row[mapping.guardian_name]?.trim() || ''),
-        guardian_phone:   row[mapping.guardian_phone]?.trim() || '',
-        class_id:         cls?.id || null,
-        school_id:        schoolId,
-      });
+      try {
+        const result = await withTimeout(db.post('students', {
+          full_name:        sanitize(row[mapping.full_name]?.trim() || ''),
+          admission_number: admNo,
+          gender:           row[mapping.gender]?.trim() || '',
+          date_of_birth:    row[mapping.date_of_birth]?.trim() || '',
+          guardian_name:    sanitize(row[mapping.guardian_name]?.trim() || ''),
+          guardian_phone:   row[mapping.guardian_phone]?.trim() || '',
+          class_id:         cls?.id || null,
+          school_id:        schoolId,
+        }), 10000);
+        if (!result) { failCount++; failedRows.push(row[mapping.full_name] || `Row ${count+2}`); }
+      } catch (e) {
+        failCount++;
+        failedRows.push(`${row[mapping.full_name] || `Row ${count+2}`} (${e.message === 'timeout' ? 'timed out — check connection' : 'failed'})`);
+      }
       count++;
       setProgress(Math.round((count / rows.length) * 100));
-      setImported(count);
+      setImported(count - failCount);
     }
+    setFailed(failedRows);
     setImporting(false);
     setStep('done');
     onDone();
@@ -1091,7 +1110,7 @@ function StudentImport({ classes, schoolId, school, onDone }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0,5).map((row,i)=>{
+                  {(showAllRows ? rows : rows.slice(0,5)).map((row,i)=>{
                     const cls = resolveClass(row[mapping.class_name]?.trim());
                     return (
                       <tr key={i} style={{borderTop:'1px solid #f1f5f9',background:i%2===0?'#fff':'#fafafa'}}>
@@ -1106,20 +1125,20 @@ function StudentImport({ classes, schoolId, school, onDone }) {
                 </tbody>
               </table>
             </div>
-            {rows.length > 5 && <div style={{padding:'8px 16px',fontSize:11,color:'#94a3b8',textAlign:'center'}}>+{rows.length-5} more rows</div>}
+            {rows.length > 5 && <div onClick={()=>setShowAllRows(s=>!s)} style={{padding:'8px 16px',fontSize:11,color:'#6366f1',fontWeight:700,textAlign:'center',cursor:'pointer'}}>{showAllRows ? 'Show fewer rows' : `+${rows.length-5} more rows — tap to view all`}</div>}
           </div>
 
           {errors.length > 0 && (
             <div style={{...S.card,background:'#fef2f2',border:'1.5px solid #ef4444',marginBottom:16}}>
               <div style={{fontWeight:800,color:'#ef4444',marginBottom:8,fontSize:13}}>⚠️ Fix these errors first:</div>
-              {errors.slice(0,5).map((e,i)=><div key={i} style={{fontSize:12,color:'#ef4444',marginBottom:4}}>• {e}</div>)}
-              {errors.length>5&&<div style={{fontSize:12,color:'#94a3b8'}}>+{errors.length-5} more errors</div>}
+              {(showAllErrors ? errors : errors.slice(0,5)).map((e,i)=><div key={i} style={{fontSize:12,color:'#ef4444',marginBottom:4}}>• {e}</div>)}
+              {errors.length>5&&<div onClick={()=>setShowAllErrors(s=>!s)} style={{fontSize:12,color:'#6366f1',fontWeight:700,cursor:'pointer',marginTop:4}}>{showAllErrors ? 'Show less' : `+${errors.length-5} more errors — tap to view all`}</div>}
             </div>
           )}
 
           <div style={{display:'flex',gap:10}}>
             <button onClick={()=>{setStep('upload');setRows([]);setErrors([]);}} style={{...S.btn('#e2e8f0'),color:'#64748b',flex:1,padding:12,fontSize:13}}>← Back</button>
-            <button onClick={runImport} style={{...S.btn('#6366f1'),flex:2,padding:12,fontSize:14}}>Import {rows.length} Students →</button>
+            <button onClick={runImport} disabled={errors.length>0} style={{...S.btn('#6366f1'),flex:2,padding:12,fontSize:14,opacity:errors.length>0?0.5:1,cursor:errors.length>0?'not-allowed':'pointer'}}>Import {rows.length} Students →</button>
           </div>
         </>
       )}
@@ -1138,9 +1157,17 @@ function StudentImport({ classes, schoolId, school, onDone }) {
 
       {step === 'done' && (
         <div style={{...S.card,textAlign:'center',padding:40}}>
-          <div style={{fontSize:48,marginBottom:12}}>🎉</div>
-          <div style={{fontWeight:900,color:'#059669',fontSize:18,marginBottom:8}}>{imported} Students Imported!</div>
-          <div style={{fontSize:13,color:'#64748b',marginBottom:24}}>All students have been added to the system successfully.</div>
+          <div style={{fontSize:48,marginBottom:12}}>{failed.length ? '⚠️' : '🎉'}</div>
+          <div style={{fontWeight:900,color: failed.length ? '#d97706' : '#059669',fontSize:18,marginBottom:8}}>{imported} of {rows.length} Students Imported</div>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:failed.length?16:24}}>
+            {failed.length ? `${failed.length} row${failed.length>1?'s':''} could not be saved — check your connection and try those again.` : 'All students have been added to the system successfully.'}
+          </div>
+          {failed.length > 0 && (
+            <div style={{...S.card,background:'#fef2f2',border:'1.5px solid #ef4444',textAlign:'left',marginBottom:20}}>
+              {failed.slice(0,5).map((f,i)=><div key={i} style={{fontSize:12,color:'#ef4444',marginBottom:4}}>• {f}</div>)}
+              {failed.length>5&&<div style={{fontSize:12,color:'#94a3b8'}}>+{failed.length-5} more</div>}
+            </div>
+          )}
           <button onClick={onDone} style={{...S.btn('#6366f1'),padding:'12px 32px',fontSize:14}}>View Students →</button>
         </div>
       )}
