@@ -494,7 +494,11 @@ function Login({ onLogin, onRegister }) {
       const students=await db.get("students",{admission_number:admNum.trim()});
       if(!students.length){setParentErr("No student found with that admission number");setParentLoading(false);return;}
       const student=students[0];
-      const [classes,terms,schools]=await Promise.all([db.get("classes"),db.get("terms"),db.get("schools")]);
+      const [classes,terms,schools]=await Promise.all([
+        db.get("classes",{school_id:student.school_id}),
+        db.get("terms",{school_id:student.school_id}),
+        db.get("schools",{id:student.school_id}),
+      ]);
       const term=terms.find(t=>t.is_current);
       if(!term){setParentErr("No current term set by school");setParentLoading(false);return;}
       const cls=classes.find(c=>c.id===student.class_id);
