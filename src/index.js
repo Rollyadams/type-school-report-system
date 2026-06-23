@@ -82,6 +82,20 @@ if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
           nw.addEventListener('statechange', () => {
             if (nw.state === 'installed' && navigator.serviceWorker.controller) {
               if (window.__showUpdateBanner) window.__showUpdateBanner();
+
+              // Don't force it on someone mid-task. Apply automatically the
+              // moment it's safe to do so: either the tab becomes hidden
+              // (they've switched away/closed it) or after a grace period
+              // if they just leave it open without tapping Update.
+              const autoApply = () => { if (window.__applyUpdate) window.__applyUpdate(); };
+              const onHide = () => {
+                if (document.visibilityState === 'hidden') {
+                  autoApply();
+                  document.removeEventListener('visibilitychange', onHide);
+                }
+              };
+              document.addEventListener('visibilitychange', onHide);
+              setTimeout(autoApply, 5 * 60 * 1000); // safety net: 5 min grace period
             }
           });
         });
