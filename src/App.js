@@ -1520,6 +1520,22 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
   const T_PAGE_SIZE=20;
   const pagedTeachers=teachers.slice((tPage-1)*T_PAGE_SIZE, tPage*T_PAGE_SIZE);
   useBackOverride(()=>{ setAdding(false); setForm({full_name:"",email:"",class_id:"",password:"",confirm:""}); }, adding);
+
+  const [editId,setEditId]=useState(null);
+  const [editForm,setEditForm]=useState({full_name:"",email:"",new_password:""});
+  const [editSaving,setEditSaving]=useState(false);
+  const startEdit=(t)=>{ setEditForm({full_name:t.full_name,email:t.email,new_password:""}); setEditId(t.id); };
+  const closeEdit=()=>{ setEditId(null); setEditForm({full_name:"",email:"",new_password:""}); };
+  const saveEdit=async()=>{
+    if(!editForm.full_name.trim()||!editForm.email.trim()){alert("Name and email required");return;}
+    if(editForm.new_password && editForm.new_password.length<6){alert("New password must be at least 6 characters");return;}
+    setEditSaving(true);
+    const payload={full_name:sanitize(editForm.full_name),email:sanitize(editForm.email)};
+    if(editForm.new_password) payload.password=await hashPassword(editForm.new_password);
+    await db.patch("users",editId,payload);
+    setEditSaving(false);closeEdit();reload();
+  };
+
   const save=async()=>{
     if(!form.full_name.trim()||!form.email.trim()){alert("Name and email required");return;}
     if(!form.password.trim()){alert("Password is required");return;}
@@ -1568,7 +1584,10 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
                 <div style={{fontSize:12,color:"#64748b"}}>✉️ {t.email}</div>
                 <div style={{fontSize:12,color:assigned?"#10b981":"#94a3b8",fontWeight:600,marginTop:4}}>🏫 {assigned?`${assigned.name} ${assigned.arm||""}`:"No class assigned"}</div>
               </div>
-              <button onClick={async()=>{if(window.confirm(`Delete ${t.full_name}?`)){await db.delete("users",t.id);reload();}}} style={{background:"#fee2e2",border:"none",borderRadius:8,color:"#ef4444",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>Delete</button>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>startEdit(t)} style={{...S.btn("#0ea5e9"),padding:"6px 12px",fontSize:12}}>Edit</button>
+                <button onClick={async()=>{if(window.confirm(`Delete ${t.full_name}?`)){await db.delete("users",t.id);reload();}}} style={{background:"#fee2e2",border:"none",borderRadius:8,color:"#ef4444",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>Delete</button>
+              </div>
             </div>
             <div><label style={S.label}>Change Class Assignment</label>
               <select style={S.input} value={t.class_id||""} onChange={e=>updateClass(t.id,e.target.value)}>
@@ -1580,6 +1599,26 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
         );
       })}
       <Pagination page={tPage} totalPages={Math.max(1,Math.ceil(teachers.length/T_PAGE_SIZE))} setPage={setTPage} total={teachers.length} pageSize={T_PAGE_SIZE}/>
+
+      {editId!==null && (
+        <div onClick={closeEdit} style={{position:"fixed",inset:0,background:"#00000066",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{...S.card,width:"100%",maxWidth:440,maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{fontWeight:800,color:"#1e293b",fontSize:16}}>✏️ Edit Teacher</div>
+              <button onClick={closeEdit} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer",lineHeight:1}}>✕</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:12}}>
+              <div><label style={S.label}>Full Name</label><input style={S.input} value={editForm.full_name} onChange={e=>setEditForm(p=>({...p,full_name:e.target.value}))}/></div>
+              <div><label style={S.label}>Email</label><input style={S.input} type="email" value={editForm.email} onChange={e=>setEditForm(p=>({...p,email:e.target.value}))}/></div>
+              <div><label style={S.label}>Reset Password (optional)</label><input style={S.input} type="password" placeholder="Leave blank to keep current password" value={editForm.new_password} onChange={e=>setEditForm(p=>({...p,new_password:e.target.value}))}/></div>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:16}}>
+              <button onClick={closeEdit} style={{...S.btn('#e2e8f0'),color:'#64748b',flex:1}}>Cancel</button>
+              <button onClick={saveEdit} disabled={editSaving} style={{...S.btn("#10b981"),flex:2}}>{editSaving?"Saving…":"Update Teacher"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
