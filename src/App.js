@@ -1514,23 +1514,34 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
 
 // ── Manage Teachers (with class assignment) ────────────────────
 function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgrade }) {
-  const [adding,setAdding]=useState(false); const [form,setForm]=useState({full_name:"",email:"",class_id:"",password:"",confirm:""});
+  const [adding,setAdding]=useState(false); const [form,setForm]=useState({full_name:"",email:"",class_ids:[],password:"",confirm:""});
   const [saving,setSaving]=useState(false);
   const [tPage,setTPage]=useState(1);
   const T_PAGE_SIZE=20;
   const pagedTeachers=teachers.slice((tPage-1)*T_PAGE_SIZE, tPage*T_PAGE_SIZE);
-  useBackOverride(()=>{ setAdding(false); setForm({full_name:"",email:"",class_id:"",password:"",confirm:""}); }, adding);
+  useBackOverride(()=>{ setAdding(false); setForm({full_name:"",email:"",class_ids:[],password:"",confirm:""}); }, adding);
+  const toggleNewClass=(cid)=>{
+    setForm(p=>({...p,class_ids: p.class_ids.includes(cid) ? p.class_ids.filter(id=>id!==cid) : [...p.class_ids,cid]}));
+  };
 
   const [editId,setEditId]=useState(null);
-  const [editForm,setEditForm]=useState({full_name:"",email:"",new_password:""});
+  const [editForm,setEditForm]=useState({full_name:"",email:"",new_password:"",class_ids:[]});
   const [editSaving,setEditSaving]=useState(false);
-  const startEdit=(t)=>{ setEditForm({full_name:t.full_name,email:t.email,new_password:""}); setEditId(t.id); };
-  const closeEdit=()=>{ setEditId(null); setEditForm({full_name:"",email:"",new_password:""}); };
+  const startEdit=(t)=>{ setEditForm({full_name:t.full_name,email:t.email,new_password:"",class_ids:t.class_ids&&t.class_ids.length?t.class_ids:(t.class_id?[t.class_id]:[])}); setEditId(t.id); };
+  const closeEdit=()=>{ setEditId(null); setEditForm({full_name:"",email:"",new_password:"",class_ids:[]}); };
+  const toggleEditClass=(cid)=>{
+    setEditForm(p=>({...p,class_ids: p.class_ids.includes(cid) ? p.class_ids.filter(id=>id!==cid) : [...p.class_ids,cid]}));
+  };
   const saveEdit=async()=>{
     if(!editForm.full_name.trim()||!editForm.email.trim()){alert("Name and email required");return;}
     if(editForm.new_password && editForm.new_password.length<6){alert("New password must be at least 6 characters");return;}
     setEditSaving(true);
-    const payload={full_name:sanitize(editForm.full_name),email:sanitize(editForm.email)};
+    const payload={
+      full_name:sanitize(editForm.full_name),
+      email:sanitize(editForm.email),
+      class_ids:editForm.class_ids,
+      class_id:editForm.class_ids[0]||null, // kept in sync for backward compatibility
+    };
     if(editForm.new_password) payload.password=await hashPassword(editForm.new_password);
     await db.patch("users",editId,payload);
     setEditSaving(false);closeEdit();reload();
@@ -1546,10 +1557,14 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
     }
     setSaving(true);
     const hashedPw = await hashPassword(form.password);
-    await db.post("users",{full_name:sanitize(form.full_name),email:sanitize(form.email),password:hashedPw,role:"teacher",school_id:schoolId,class_id:form.class_id||null});
-    setForm({full_name:"",email:"",class_id:"",password:"",confirm:""});setAdding(false);setSaving(false);reload();
+    await db.post("users",{full_name:sanitize(form.full_name),email:sanitize(form.email),password:hashedPw,role:"teacher",school_id:schoolId,class_ids:form.class_ids,class_id:form.class_ids[0]||null});
+    setForm({full_name:"",email:"",class_ids:[],password:"",confirm:""});setAdding(false);setSaving(false);reload();
   };
-  const updateClass=async(tid,cid)=>{ await db.patch("users",tid,{class_id:cid||null}); reload(); };
+  const classNamesFor=(t)=>{
+    const ids = t.class_ids&&t.class_ids.length ? t.class_ids : (t.class_id ? [t.class_id] : []);
+    const names = ids.map(id=>classes.find(c=>c.id===id)).filter(Boolean).map(c=>`${c.name} ${c.arm||""}`.trim());
+    return names;
+  };
   return(
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -1563,11 +1578,17 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
             <div><label style={S.label}>Email</label><input style={S.input} type="email" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))} placeholder="teacher@school.com"/></div>
             <div><label style={S.label}>Password</label><input style={S.input} type="password" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))} placeholder="Min. 6 characters"/></div>
             <div><label style={S.label}>Confirm Password</label><input style={S.input} type="password" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} placeholder="Repeat password"/></div>
-            <div style={{gridColumn:"1/-1"}}><label style={S.label}>Assign Class</label>
-              <select style={S.input} value={form.class_id} onChange={e=>setForm(p=>({...p,class_id:e.target.value}))}>
-                <option value="">No class assigned</option>
-                {classes.map(c=><option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
-              </select>
+            <div style={{gridColumn:"1/-1"}}>
+              <label style={S.label}>Assign Classes {form.class_ids.length>1?`(${form.class_ids.length} selected)`:""}</label>
+              <div style={{border:"1.5px solid #e2e8f0",borderRadius:10,maxHeight:160,overflowY:"auto",padding:8}}>
+                {classes.length===0 && <div style={{fontSize:12,color:"#94a3b8",padding:4}}>No classes created yet.</div>}
+                {classes.map(c=>(
+                  <label key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer",fontSize:13,color:"#374151"}}>
+                    <input type="checkbox" checked={form.class_ids.includes(c.id)} onChange={()=>toggleNewClass(c.id)}/>
+                    {c.name} {c.arm||""}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
           <button onClick={save} disabled={saving} style={{...S.btn("#10b981"),marginTop:16}}>{saving?"Saving…":"Save Teacher"}</button>
@@ -1575,25 +1596,19 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
       )}
       {teachers.length===0&&!adding&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No teachers yet.</div>}
       {pagedTeachers.map(t=>{
-        const assigned=classes.find(c=>c.id===t.class_id);
+        const names=classNamesFor(t);
         return(
           <div key={t.id} style={{...S.card,padding:"14px 16px",marginBottom:8}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
               <div>
                 <div style={{fontWeight:700,color:"#1e293b"}}>{t.full_name}</div>
                 <div style={{fontSize:12,color:"#64748b"}}>✉️ {t.email}</div>
-                <div style={{fontSize:12,color:assigned?"#10b981":"#94a3b8",fontWeight:600,marginTop:4}}>🏫 {assigned?`${assigned.name} ${assigned.arm||""}`:"No class assigned"}</div>
+                <div style={{fontSize:12,color:names.length?"#10b981":"#94a3b8",fontWeight:600,marginTop:4}}>🏫 {names.length?names.join(", "):"No class assigned"}</div>
               </div>
               <div style={{display:"flex",gap:6}}>
                 <button onClick={()=>startEdit(t)} style={{...S.btn("#0ea5e9"),padding:"6px 12px",fontSize:12}}>Edit</button>
                 <button onClick={async()=>{if(window.confirm(`Delete ${t.full_name}?`)){await db.delete("users",t.id);reload();}}} style={{background:"#fee2e2",border:"none",borderRadius:8,color:"#ef4444",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>Delete</button>
               </div>
-            </div>
-            <div><label style={S.label}>Change Class Assignment</label>
-              <select style={S.input} value={t.class_id||""} onChange={e=>updateClass(t.id,e.target.value)}>
-                <option value="">No class assigned</option>
-                {classes.map(c=><option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
-              </select>
             </div>
           </div>
         );
@@ -1611,6 +1626,18 @@ function ManageTeachers({ teachers, classes, reload, schoolId, planInfo, onUpgra
               <div><label style={S.label}>Full Name</label><input style={S.input} value={editForm.full_name} onChange={e=>setEditForm(p=>({...p,full_name:e.target.value}))}/></div>
               <div><label style={S.label}>Email</label><input style={S.input} type="email" value={editForm.email} onChange={e=>setEditForm(p=>({...p,email:e.target.value}))}/></div>
               <div><label style={S.label}>Reset Password (optional)</label><input style={S.input} type="password" placeholder="Leave blank to keep current password" value={editForm.new_password} onChange={e=>setEditForm(p=>({...p,new_password:e.target.value}))}/></div>
+              <div>
+                <label style={S.label}>Assigned Classes {editForm.class_ids.length>1?`(${editForm.class_ids.length} selected)`:""}</label>
+                <div style={{border:"1.5px solid #e2e8f0",borderRadius:10,maxHeight:200,overflowY:"auto",padding:8}}>
+                  {classes.length===0 && <div style={{fontSize:12,color:"#94a3b8",padding:4}}>No classes created yet.</div>}
+                  {classes.map(c=>(
+                    <label key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",cursor:"pointer",fontSize:13,color:"#374151"}}>
+                      <input type="checkbox" checked={editForm.class_ids.includes(c.id)} onChange={()=>toggleEditClass(c.id)}/>
+                      {c.name} {c.arm||""}
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
             <div style={{display:"flex",gap:10,marginTop:16}}>
               <button onClick={closeEdit} style={{...S.btn('#e2e8f0'),color:'#64748b',flex:1}}>Cancel</button>
@@ -4231,7 +4258,8 @@ function TeacherDash({ user, onLogout }) {
     ]);
     const schoolData=sc[0]||null; setSchool(schoolData); setTerms(t);
     const curr=t.find(t=>t.is_current); if(curr) setSelectedTerm(curr.id);
-    if(user.class_id){setClasses(c.filter(cls=>cls.id===user.class_id));setSelectedClass(user.class_id);}
+    const myClassIds = (user.class_ids && user.class_ids.length) ? user.class_ids : (user.class_id ? [user.class_id] : []);
+    if(myClassIds.length){setClasses(c.filter(cls=>myClassIds.includes(cls.id)));setSelectedClass(myClassIds[0]);}
     else setClasses(c);
     // Load all students for this school (used by DailyAttendance)
     db.get("students",{school_id:schoolId}).then(setAllSchoolStudents);
@@ -4328,14 +4356,32 @@ function TeacherDash({ user, onLogout }) {
     {id:"report",     label:"View Reports",     icon:"📋", desc:"View & download report cards"},
   ];
 
+  const myClassIds = (user.class_ids && user.class_ids.length) ? user.class_ids : (user.class_id ? [user.class_id] : []);
+
   const TeacherResults = () => (
     <div>
       <div style={S.section("#0ea5e9")}><span>📝</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Enter Student Results</span></div>
-      {!user.class_id&&<div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#92400e",fontWeight:600}}>⚠️ No class assigned. Ask the Principal to assign you a class.</div>}
+      {!myClassIds.length&&<div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#92400e",fontWeight:600}}>⚠️ No class assigned. Ask the Principal to assign you a class.</div>}
+      {myClassIds.length>0 && (
+        <div style={{...S.card,marginBottom:16,background:"#f0fdf4",border:"1.5px solid #bbf7d0"}}>
+          <div style={{fontWeight:800,color:"#059669",fontSize:13,marginBottom:8}}>🏫 Your Class{myClassIds.length>1?"es":""} ({myClassIds.length})</div>
+          {myClassIds.map(cid=>{
+            const c=classes.find(cl=>cl.id===cid);
+            if(!c) return null;
+            const subs=NIGERIAN_SUBJECTS[c.name]||[];
+            return (
+              <div key={cid} style={{marginBottom:6,paddingBottom:6,borderBottom:"1px solid #d1fae5"}}>
+                <div style={{fontWeight:700,color:"#1e293b",fontSize:13}}>{c.name} {c.arm||""}</div>
+                <div style={{fontSize:11,color:"#64748b"}}>{subs.length} subjects: {subs.slice(0,4).join(", ")}{subs.length>4?`, +${subs.length-4} more`:""}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div style={S.card}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
           <div><label style={S.label}>Class</label>
-            <select style={S.input} value={selectedClass} onChange={e=>setSelectedClass(e.target.value)} disabled={!!user.class_id}>
+            <select style={S.input} value={selectedClass} onChange={e=>setSelectedClass(e.target.value)} disabled={myClassIds.length===1}>
               <option value="">Choose class</option>
               {classes.map(c=><option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
             </select>
