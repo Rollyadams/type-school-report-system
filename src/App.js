@@ -858,6 +858,7 @@ function StudentImport({ classes, schoolId, school, onDone }) {
   const [importing, setImporting] = useState(false);
   const [progress, setProgress]   = useState(0);
   const [imported, setImported]   = useState(0);
+  const [reading, setReading]     = useState(false);
   const fileRef                   = useRef(null);
 
   const REQUIRED_FIELDS = [
@@ -905,15 +906,45 @@ function StudentImport({ classes, schoolId, school, onDone }) {
 
   const handleFile = (file) => {
     if (!file) return;
+    if (!/\.(csv|txt)$/i.test(file.name)) {
+      alert('Please select a .csv or .txt file. If your file is from Excel, use "Save As → CSV" first.');
+      return;
+    }
+    setReading(true);
     const reader = new FileReader();
+
+    // Some Android file pickers (e.g. picking from Drive/Sheets instead of
+    // a local file) can leave FileReader stuck with no load/error event.
+    // A hard timeout guarantees the user always gets feedback.
+    const timeout = setTimeout(() => {
+      reader.abort();
+      setReading(false);
+      alert('Reading the file took too long. Please make sure you selected a local CSV file (not a Google Drive/Sheets link) and try again.');
+    }, 15000);
+
     reader.onload = (e) => {
-      const text = e.target.result;
-      const { headers, rows } = parseCSV(text);
-      if (!headers.length) { alert('Could not read file. Make sure it is a CSV file.'); return; }
-      setHeaders(headers);
-      setRows(rows);
-      setMapping(autoMap(headers));
-      setStep('preview');
+      clearTimeout(timeout);
+      setReading(false);
+      try {
+        const text = e.target.result;
+        const { headers, rows } = parseCSV(text);
+        if (!headers.length) { alert('Could not read file. Make sure it is a CSV file.'); return; }
+        setHeaders(headers);
+        setRows(rows);
+        setMapping(autoMap(headers));
+        setStep('preview');
+      } catch (err) {
+        alert('Could not read this file. Please confirm it is a valid CSV exported from Excel or Google Sheets.');
+      }
+    };
+    reader.onerror = () => {
+      clearTimeout(timeout);
+      setReading(false);
+      alert('Failed to read the file. Please try selecting it again.');
+    };
+    reader.onabort = () => {
+      clearTimeout(timeout);
+      setReading(false);
     };
     reader.readAsText(file);
   };
@@ -1005,8 +1036,8 @@ function StudentImport({ classes, schoolId, school, onDone }) {
             <div style={{fontWeight:800,color:'#1e293b',fontSize:15,marginBottom:6}}>Upload Student List</div>
             <div style={{fontSize:13,color:'#64748b',marginBottom:20}}>Upload a CSV file with your student data. Download the template below to get started.</div>
             <input ref={fileRef} type="file" accept=".csv,.txt" style={{display:'none'}} onChange={e=>handleFile(e.target.files[0])}/>
-            <button onClick={()=>fileRef.current.click()} style={{...S.btn('#6366f1'),padding:'12px 28px',fontSize:14,marginBottom:12,width:'100%'}}>
-              📂 Choose CSV File
+            <button onClick={()=>fileRef.current.click()} disabled={reading} style={{...S.btn('#6366f1'),padding:'12px 28px',fontSize:14,marginBottom:12,width:'100%',opacity:reading?0.7:1}}>
+              {reading ? '⏳ Reading file…' : '📂 Choose CSV File'}
             </button>
             <button onClick={downloadTemplate} style={{...S.btn('#e2e8f0'),color:'#6366f1',padding:'10px 20px',fontSize:13,width:'100%'}}>
               ⬇️ Download Template
@@ -3566,8 +3597,9 @@ function OnboardingFlow({ school, user, classes, terms, teachers, students, relo
 
       {steps.map((step, i) => {
         const done = completed[step.id];
+        const TAB_MAP = { school:'settings', session:'settings', classes:'classes', teachers:'teachers', students:'students' };
         return (
-          <div key={step.id} onClick={() => !done && onComplete(step.id)}
+          <div key={step.id} onClick={() => !done && onComplete(TAB_MAP[step.id] || step.id)}
             style={{ display:'flex', alignItems:'center', gap:12, padding:'10px 0',
               borderBottom: i < steps.length-1 ? '1px solid #f1f5f9' : 'none',
               cursor: done ? 'default' : 'pointer', opacity: done ? 0.7 : 1 }}>
