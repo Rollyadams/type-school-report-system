@@ -1256,9 +1256,9 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
               <button onClick={()=>{if(adding){resetForm();setEditId(null);}setAdding(!adding);}} style={S.btn()}>{adding?"Cancel":"+ Add"}</button>
             </div>
           </div>
-      {adding&&(
+      {adding&&editId===null&&(
         <div style={S.card}>
-          <div style={{fontWeight:800,color:"#1e293b",marginBottom:16}}>{editId?"Edit Student":"New Student"}</div>
+          <div style={{fontWeight:800,color:"#1e293b",marginBottom:16}}>New Student</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             {[["full_name","Full Name"],["admission_number","Admission No"],["guardian_name","Guardian Name"],["guardian_phone","Guardian WhatsApp"]].map(([k,l])=>(
               <div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))}/></div>
@@ -1272,7 +1272,34 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
               </select>
             </div>
           </div>
-          <button onClick={save} disabled={saving} style={{...S.btn("#10b981"),marginTop:16}}>{saving?"Saving…":editId?"Update Student":"Save Student"}</button>
+          <button onClick={save} disabled={saving} style={{...S.btn("#10b981"),marginTop:16}}>{saving?"Saving…":"Save Student"}</button>
+        </div>
+      )}
+      {editId!==null && (
+        <div onClick={()=>{resetForm();setEditId(null);setAdding(false);}} style={{position:"fixed",inset:0,background:"#00000066",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{...S.card,width:"100%",maxWidth:440,maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{fontWeight:800,color:"#1e293b",fontSize:16}}>✏️ Edit Student</div>
+              <button onClick={()=>{resetForm();setEditId(null);setAdding(false);}} style={{background:"none",border:"none",fontSize:20,color:"#94a3b8",cursor:"pointer",lineHeight:1}}>✕</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              {[["full_name","Full Name"],["admission_number","Admission No"],["guardian_name","Guardian Name"],["guardian_phone","Guardian WhatsApp"]].map(([k,l])=>(
+                <div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={e=>setForm(p=>({...p,[k]:e.target.value}))}/></div>
+              ))}
+              <div><label style={S.label}>Gender</label><select style={S.input} value={form.gender} onChange={e=>setForm(p=>({...p,gender:e.target.value}))}><option value="">Select</option><option>Male</option><option>Female</option></select></div>
+              <div><label style={S.label}>Date of Birth</label><input style={S.input} type="date" value={form.date_of_birth} onChange={e=>setForm(p=>({...p,date_of_birth:e.target.value}))}/></div>
+              <div style={{gridColumn:"1/-1"}}><label style={S.label}>Class</label>
+                <select style={S.input} value={form.class_id} onChange={e=>setForm(p=>({...p,class_id:e.target.value}))}>
+                  <option value="">Select Class</option>
+                  {classes.map(c=><option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:16}}>
+              <button onClick={()=>{resetForm();setEditId(null);setAdding(false);}} style={{...S.btn('#e2e8f0'),color:'#64748b',flex:1}}>Cancel</button>
+              <button onClick={save} disabled={saving} style={{...S.btn("#10b981"),flex:2}}>{saving?"Saving…":"Update Student"}</button>
+            </div>
+          </div>
         </div>
       )}
       <input style={{...S.input,marginBottom:12}} placeholder="🔍 Search students…" value={search} onChange={e=>setSearch(e.target.value)}/>
