@@ -62,6 +62,14 @@ function Pagination({ page, totalPages, setPage, total, pageSize }) {
 }
 
 const NIGERIAN_SUBJECTS = {
+  "Creche":  ["Number Work","Letter Work","Rhymes","Colouring","Show & Tell","Physical Activity"],
+  "Beginner":  ["Number Work","Letter Work","Rhymes","Colouring","Show & Tell","Physical Activity"],
+  "Nursery":  ["English Language","Number Work","Phonics","Rhymes","Creative Activity","CRS/IRS","Physical & Health Education"],
+  "Basic 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
+  "Basic 2":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
+  "Basic 3":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
+  "Basic 4":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
+  "Basic 5":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Primary 1":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Primary 2":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
   "Primary 3":  ["English Language","Mathematics","Basic Science & Technology","Social Studies","Civic Education","CRS/IRS","Nigerian Language","Physical & Health Education","Creative & Cultural Arts","Computer Studies"],
@@ -83,6 +91,8 @@ const NIGERIAN_SUBJECTS = {
 };
 
 const CLASS_ORDER = [
+  "Creche","Beginner","Nursery",
+  "Basic 1","Basic 2","Basic 3","Basic 4","Basic 5",
   "Primary 1","Primary 2","Primary 3","Primary 4","Primary 5","Primary 6",
   "JSS 1","JSS 2","JSS 3",
   "SS 1 Science","SS 2 Science","SS 3 Science",
@@ -1387,7 +1397,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
             <div><label style={S.label}>Class Level</label><select style={S.input} value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))}><option value="">Select</option>{levels.map(l=><option key={l} value={l}>{l}</option>)}</select></div>
             <div><label style={S.label}>Arm</label><select style={S.input} value={form.arm} onChange={e=>setForm(p=>({...p,arm:e.target.value}))}><option value="">None</option>{["A","B","C","D"].map(a=><option key={a}>{a}</option>)}</select></div>
-            <div><label style={S.label}>Level</label><select style={S.input} value={form.level} onChange={e=>setForm(p=>({...p,level:e.target.value}))}><option value="">Select</option><option>Primary</option><option>Junior Secondary</option><option>Senior Secondary</option></select></div>
+            <div><label style={S.label}>Level</label><select style={S.input} value={form.level} onChange={e=>setForm(p=>({...p,level:e.target.value}))}><option value="">Select</option><option>Pre-Nursery</option><option>Basic</option><option>Primary</option><option>Junior Secondary</option><option>Senior Secondary</option></select></div>
           </div>
           <button onClick={save} style={{...S.btn("#0ea5e9"),marginTop:16}}>Save Class</button>
         </div>
