@@ -6,6 +6,11 @@ import * as Sentry from '@sentry/react';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
+// Emails listed here see developer-only diagnostics (e.g. the sync status
+// banner). Add your own login email here. School staff/principals will
+// never see this UI regardless of their role.
+const DEV_EMAILS = ['YOUR_EMAIL_HERE@example.com'];
+
 const getLocalDate = () => {
   const d = new Date();
   const year  = d.getFullYear();
@@ -1851,9 +1856,12 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     setSavingRemark(true);setRemarkSaveError('');
     try{
       const rem=remarks.find(r=>r.student_id===sid);
-      const result = rem?.id
-        ? await db.patch("remarks",rem.id,{principal_remark:remark})
-        : await db.post("remarks",{student_id:sid,term_id:selectedTerm,principal_remark:remark});
+      const result = await db.upsert("remarks",{
+        ...(rem?.id ? {id:rem.id} : {}),
+        student_id:sid,
+        term_id:selectedTerm,
+        principal_remark:remark,
+      }, "student_id,term_id");
       if(!result){ setRemarkSaveError('Could not save — check your connection and try again.'); }
       setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
     }catch(e){
@@ -2510,8 +2518,8 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
         </div>
       </div>
 
-      {/* ── Sync Status Banner ── */}
-      <SyncBanner />
+      {/* ── Sync Status Banner — developer-only, hidden from school staff ── */}
+      {DEV_EMAILS.includes(user?.email) && <SyncBanner />}
       {/* ── PWA Install Banner ── */}
       <InstallBanner />
 
