@@ -123,7 +123,16 @@ export const db = {
       return full;
     }
     await ensureContext();
-    const { data, error } = await supabase.from(table).update(payload).eq('id', id).select().single();
+    let data, error;
+    try {
+      const result = await Promise.race([
+        supabase.from(table).update(payload).eq('id', id).select().single(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('db.patch network timeout')), 10000)),
+      ]);
+      data = result.data; error = result.error;
+    } catch (e) {
+      error = e;
+    }
     if (error) {
       if (QUEUEABLE.includes(table)) {
         const cacheTable = CACHEABLE[table];
