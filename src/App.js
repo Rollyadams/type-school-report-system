@@ -517,13 +517,14 @@ function Login({ onLogin, onRegister }) {
       const students=await db.get("students",{admission_number:admNum.trim()});
       if(!students.length){setParentErr("No student found with that admission number");setParentLoading(false);return;}
       const student=students[0];
-      const [classes,terms,schools]=await Promise.all([
+      const [classes,terms,schools,sessions]=await Promise.all([
         db.get("classes",{school_id:student.school_id}),
         db.get("terms",{school_id:student.school_id}),
         db.get("schools",{id:student.school_id}),
+        db.get("sessions",{school_id:student.school_id}),
       ]);
-      const term=terms.find(t=>t.is_current);
-      if(!term){setParentErr("No current term set by school");setParentLoading(false);return;}
+      const term=terms.find(t=>t.is_current)||terms[0];
+      if(!term){setParentErr("No term records found for this school yet");setParentLoading(false);return;}
       const cls=classes.find(c=>c.id===student.class_id);
       const subjects=getClassSubjects(cls);
       const classmatesAll=await db.get("students",{class_id:student.class_id});
@@ -533,7 +534,7 @@ function Login({ onLogin, onRegister }) {
         db.get("attendance",{student_id:student.id,term_id:term.id}),
         db.get("remarks",{student_id:student.id,term_id:term.id}),
       ]);
-      setParentData({student,cls,term,subjects,results,allStudents:classmatesAll,allResults,attendance:attendance[0]||null,remarks:remarks[0]||null,school:schools[0]||null});
+      setParentData({student,cls,term,terms,sessions,subjects,results,allStudents:classmatesAll,allResults,attendance:attendance[0]||null,remarks:remarks[0]||null,school:schools[0]||null});
     }catch(e){setParentErr("Error fetching result. Try again.");}
     setParentLoading(false);
   };
@@ -570,7 +571,7 @@ function Login({ onLogin, onRegister }) {
             <div style={{marginBottom:16}}><label style={S.label}>Admission Number</label><input style={S.input} value={admNum} onChange={e=>setAdmNum(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkResult()} placeholder="e.g. CBS/2024/001"/></div>
             {parentErr&&<div style={{color:"#ef4444",fontSize:13,marginBottom:12,textAlign:"center"}}>{parentErr}</div>}
             <button onClick={checkResult} disabled={parentLoading} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{parentLoading?"Checking…":"View My Child's Result →"}</button>
-            <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number to view current term result.</p>
+            <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number. You'll be able to switch between sessions and terms after.</p>
           </>
         )}
         <p style={{textAlign:"center",color:"#94a3b8",fontSize:13,marginTop:20,borderTop:"1px solid #f1f5f9",paddingTop:16}}>
@@ -584,8 +585,39 @@ function Login({ onLogin, onRegister }) {
 
 // ── Parent Result View ─────────────────────────────────────────
 function ParentResultView({ data, onBack }) {
-  const {student,cls,term,subjects,results,allStudents,allResults,attendance,remarks,school}=data;
+  const {student,cls,subjects:initialSubjects,allStudents,school}=data;
   const [generating,setGenerating]=useState(false);
+  const [switching,setSwitching]=useState(false);
+  const [switchErr,setSwitchErr]=useState("");
+  const [view,setView]=useState({
+    term:data.term, results:data.results, allResults:data.allResults,
+    attendance:data.attendance, remarks:data.remarks, subjects:initialSubjects,
+  });
+  const sessions = data.sessions||[];
+  const allTerms = data.terms||[];
+  const [selectedSessionId,setSelectedSessionId]=useState(view.term?.session_id||"");
+  const termsInSession = selectedSessionId ? allTerms.filter(t=>t.session_id===selectedSessionId) : allTerms;
+
+  const switchTerm=async(termId)=>{
+    const term=allTerms.find(t=>t.id===termId);
+    if(!term){return;}
+    setSwitching(true);setSwitchErr("");
+    try{
+      const classmatesAll=await db.get("students",{class_id:student.class_id});
+      const [results,allResults,attendance,remarks]=await Promise.all([
+        db.get("results",{student_id:student.id,term_id:term.id}),
+        db.get("results",{term_id:term.id,student_id:classmatesAll.map(s=>s.id)}),
+        db.get("attendance",{student_id:student.id,term_id:term.id}),
+        db.get("remarks",{student_id:student.id,term_id:term.id}),
+      ]);
+      setView({term,results,allResults,attendance:attendance[0]||null,remarks:remarks[0]||null,subjects:initialSubjects});
+    }catch(e){
+      setSwitchErr("Could not load that term's result. Check your connection and try again.");
+    }
+    setSwitching(false);
+  };
+
+  const {term,results,allResults,attendance,remarks,subjects}=view;
   const sResults=subjects.map(sub=>{
     const r=results.find(r=>r.subject_name===sub);
     return {sub,ca:r?.ca_score||0,exam:r?.exam_score||0,total:(r?.ca_score||0)+(r?.exam_score||0)};
@@ -614,6 +646,32 @@ function ParentResultView({ data, onBack }) {
           <button onClick={onBack} style={S.btn("#64748b")}>← Back</button>
           <button onClick={handleDownload} disabled={generating} style={S.btn("#6366f1")}>{generating?"⏳ Generating…":"📥 Download PDF"}</button>
         </div>
+
+        {(sessions.length>0 || allTerms.length>1) && (
+          <div style={{...S.card,marginBottom:16}}>
+            <div style={{fontWeight:800,fontSize:13,color:"#1e293b",marginBottom:10}}>📅 Viewing Result For</div>
+            <div style={{display:"grid",gridTemplateColumns:sessions.length>0?"1fr 1fr":"1fr",gap:10}}>
+              {sessions.length>0&&(
+                <div>
+                  <label style={S.label}>Session</label>
+                  <select style={S.input} value={selectedSessionId} onChange={e=>setSelectedSessionId(e.target.value)}>
+                    {sessions.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label style={S.label}>Term</label>
+                <select style={S.input} value={term?.id||""} onChange={e=>switchTerm(e.target.value)} disabled={switching}>
+                  {termsInSession.length===0&&<option value="">No terms in this session</option>}
+                  {termsInSession.map(t=><option key={t.id} value={t.id}>{t.name}{t.is_current?" ✓":""}</option>)}
+                </select>
+              </div>
+            </div>
+            {switching&&<div style={{fontSize:12,color:"#6366f1",marginTop:8}}>Loading result…</div>}
+            {switchErr&&<div style={{fontSize:12,color:"#ef4444",marginTop:8}}>⚠️ {switchErr}</div>}
+          </div>
+        )}
+
         <div style={{...S.card,background:"linear-gradient(135deg,#1e3a8a,#4338ca)",color:"#fff",textAlign:"center",padding:24}}>
           <div style={{fontSize:32}}>🎓</div>
           <h2 style={{margin:"8px 0 4px",fontSize:18}}>{school?.name||"School"}</h2>
