@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, supabase, activateUserContext, clearUserContext } from './supabaseClient';
-import { useSyncEngine, retryFailed } from './syncEngine';
+import { useSyncEngine } from './syncEngine';
+import { offlineDB } from './offlineDB';
 import * as Sentry from '@sentry/react';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
@@ -1844,11 +1845,21 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     setBulkGenerating(false); alert("✅ All report cards generated & uploaded!");
   };
 
+  const [savingRemark,setSavingRemark]=useState(false);
+  const [remarkSaveError,setRemarkSaveError]=useState('');
   const updatePrincipalRemark=async(sid,remark)=>{
-    const rem=remarks.find(r=>r.student_id===sid);
-    if(rem?.id) await db.patch("remarks",rem.id,{principal_remark:remark});
-    else await db.post("remarks",{student_id:sid,term_id:selectedTerm,principal_remark:remark});
-    setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
+    setSavingRemark(true);setRemarkSaveError('');
+    try{
+      const rem=remarks.find(r=>r.student_id===sid);
+      const result = rem?.id
+        ? await db.patch("remarks",rem.id,{principal_remark:remark})
+        : await db.post("remarks",{student_id:sid,term_id:selectedTerm,principal_remark:remark});
+      if(!result){ setRemarkSaveError('Could not save — check your connection and try again.'); }
+      setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
+    }catch(e){
+      setRemarkSaveError('Could not save — check your connection and try again.');
+    }
+    setSavingRemark(false);
   };
 
   const applyBulkRemark=async()=>{
@@ -1881,8 +1892,9 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
         </div>
         {isPrincipal&&(
           <div style={{...S.card,marginBottom:16}}>
-            <div style={{fontWeight:700,color:"#1e293b",marginBottom:8}}>🏛 Principal's Remark {!rem?.principal_remark&&<span style={{color:"#ef4444",fontSize:11}}>* Required before sending</span>}</div>
+            <div style={{fontWeight:700,color:"#1e293b",marginBottom:8}}>🏛 Principal's Remark {!rem?.principal_remark&&<span style={{color:"#ef4444",fontSize:11}}>* Required before sending</span>} {savingRemark&&<span style={{color:"#6366f1",fontSize:11}}>· Saving…</span>}</div>
             <textarea key={reportStudent.id+(rem?.id||'')} style={{...S.input,height:60,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Type remark or pick template below…"/>
+            {remarkSaveError && <div style={{color:"#ef4444",fontSize:11,marginTop:4,fontWeight:600}}>⚠️ {remarkSaveError}</div>}
             <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
               {REMARK_TEMPLATES.map(t=>(
                 <button key={t} onClick={()=>updatePrincipalRemark(reportStudent.id,t)} style={{background:rem?.principal_remark===t?"#dbeafe":"#f1f5f9",border:rem?.principal_remark===t?"1px solid #6366f1":"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",color:rem?.principal_remark===t?"#4338ca":"#475569",fontWeight:rem?.principal_remark===t?700:400}}>{t}</button>
@@ -2347,10 +2359,23 @@ function InstallBanner() {
 }
 
 function SyncBanner() {
-  const { online, pendingCount, failedCount, syncing, lastSync, flush } = useSyncEngine();
+  const { online, pendingCount, failedCount, syncing, lastSync, flush, retryFailed: retry } = useSyncEngine();
   const [dismissed, setDismissed] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [failedItems, setFailedItems] = useState([]);
 
   useEffect(() => { setDismissed(false); }, [online, pendingCount, failedCount]);
+
+  const loadFailedDetails = async () => {
+    const items = await offlineDB.queue.where('status').equals('failed').toArray();
+    setFailedItems(items);
+    setShowDetails(true);
+  };
+
+  const discardFailed = async (id) => {
+    await offlineDB.queue.delete(id);
+    setFailedItems(items => items.filter(i => i.id !== id));
+  };
 
   if (dismissed) return null;
   if (online && pendingCount === 0 && failedCount === 0) return null;
@@ -2366,18 +2391,42 @@ function SyncBanner() {
     : `${pendingCount} record${pendingCount>1?'s':''} pending sync`;
 
   return (
-    <div style={{ background: bg, color:'#fff', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:12, fontWeight:600, gap:8 }}>
-      <span>{icon} {message}</span>
-      <div style={{ display:'flex', gap:8, flexShrink:0 }}>
-        {online && (pendingCount > 0 || failedCount > 0) && (
-          <button onClick={() => failedCount > 0 ? retryFailed() : flush()}
-            style={{ background:'#ffffff25', border:'none', color:'#fff', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:700, cursor:'pointer' }}>
-            {failedCount > 0 ? 'Retry' : 'Sync now'}
-          </button>
-        )}
-        <button onClick={() => setDismissed(true)}
-          style={{ background:'none', border:'none', color:'#ffffffaa', fontSize:14, cursor:'pointer', padding:'0 4px' }}>✕</button>
+    <div>
+      <div style={{ background: bg, color:'#fff', padding:'8px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', fontSize:12, fontWeight:600, gap:8 }}>
+        <span>{icon} {message}</span>
+        <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+          {failedCount > 0 && (
+            <button onClick={loadFailedDetails} style={{ background:'none', border:'none', color:'#ffffffcc', fontSize:11, cursor:'pointer', textDecoration:'underline', padding:0 }}>Details</button>
+          )}
+          {online && (pendingCount > 0 || failedCount > 0) && (
+            <button onClick={() => failedCount > 0 ? retry() : flush()} disabled={syncing}
+              style={{ background:'#ffffff25', border:'none', color:'#fff', borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:700, cursor:syncing?'wait':'pointer', opacity:syncing?0.6:1 }}>
+              {syncing ? 'Syncing…' : failedCount > 0 ? 'Retry' : 'Sync now'}
+            </button>
+          )}
+          <button onClick={() => setDismissed(true)}
+            style={{ background:'none', border:'none', color:'#ffffffaa', fontSize:14, cursor:'pointer', padding:'0 4px' }}>✕</button>
+        </div>
       </div>
+      {showDetails && (
+        <div style={{ background:'#fef2f2', borderBottom:'1px solid #fecaca', padding:'10px 14px', fontSize:11 }}>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+            <span style={{fontWeight:800,color:'#991b1b'}}>Failed sync items ({failedItems.length})</span>
+            <span onClick={()=>setShowDetails(false)} style={{cursor:'pointer',color:'#991b1b'}}>✕ close</span>
+          </div>
+          {failedItems.length===0 && <div style={{color:'#94a3b8'}}>No details available — they may have just been retried.</div>}
+          {failedItems.map(item=>(
+            <div key={item.id} style={{background:'#fff',borderRadius:8,padding:'8px 10px',marginBottom:6,display:'flex',justifyContent:'space-between',gap:8}}>
+              <div>
+                <div style={{fontWeight:700,color:'#1e293b'}}>{item.table} · {item.operation}</div>
+                <div style={{color:'#ef4444',marginTop:2}}>{item.error || 'Unknown error'}</div>
+                <div style={{color:'#94a3b8',marginTop:2}}>Retries: {item.retries}/5</div>
+              </div>
+              <button onClick={()=>discardFailed(item.id)} style={{background:'#fee2e2',border:'none',borderRadius:6,color:'#ef4444',padding:'4px 8px',fontSize:10,fontWeight:700,cursor:'pointer',flexShrink:0,height:'fit-content'}}>Discard</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
