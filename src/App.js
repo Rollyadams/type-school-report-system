@@ -97,6 +97,10 @@ const NIGERIAN_SUBJECTS = {
   "SS 3 Commercial": ["English Language","Mathematics","Accounting","Commerce","Business Studies","Economics","Marketing","Office Practice","Computer Applications","CRS/IRS"],
 };
 
+// Flat, deduplicated, alphabetised list of every subject across all class
+// levels — used to power the "Add Subject" autocomplete suggestions.
+const ALL_SUBJECTS = [...new Set(Object.values(NIGERIAN_SUBJECTS).flat())].sort();
+
 const CLASS_ORDER = [
   "Creche","Beginner","Kindergarten","Nursery",
   "Basic 1","Basic 2","Basic 3","Basic 4","Basic 5",
@@ -1452,12 +1456,21 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
   // ── Detail view: subjects editor ────────────────────────────
   if(selectedClass){
     const subjects=getSubjects(selectedClass);
-    const addSubject=()=>{
-      const s=newSubject.trim();
-      if(!s||subjects.includes(s)){setNewSubject("");return;}
+    const [subjectError,setSubjectError]=useState("");
+    const [showSuggestions,setShowSuggestions]=useState(false);
+    const addSubject=(value)=>{
+      const s=(value??newSubject).trim();
+      if(!s){ setSubjectError("Type a subject name first."); return; }
+      if(subjects.some(existing=>existing.toLowerCase()===s.toLowerCase())){
+        setSubjectError(`"${s}" is already in this class's subject list.`);
+        return;
+      }
       const updated={...customSubjects,[selectedClass.id]:[...subjects,s]};
-      saveCustomSubjects(updated); setNewSubject("");
+      saveCustomSubjects(updated); setNewSubject(""); setSubjectError(""); setShowSuggestions(false);
     };
+    const suggestions = newSubject.trim()
+      ? ALL_SUBJECTS.filter(s=>s.toLowerCase().includes(newSubject.trim().toLowerCase()) && !subjects.some(ex=>ex.toLowerCase()===s.toLowerCase())).slice(0,6)
+      : [];
     const removeSubject=(sub)=>{
       const updated={...customSubjects,[selectedClass.id]:subjects.filter(s=>s!==sub)};
       saveCustomSubjects(updated);
@@ -1479,10 +1492,27 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
           {customSubjects[selectedClass.id]&&<button onClick={resetSubjects} style={{...S.btn("#94a3b8"),padding:"5px 10px",fontSize:11}}>↺ Reset Default</button>}
         </div>
         {/* Add subject input */}
-        <div style={{display:"flex",gap:8,marginBottom:16}}>
-          <input style={{...S.input,flex:1,margin:0}} value={newSubject} onChange={e=>setNewSubject(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSubject()} placeholder="Add new subject…"/>
-          <button onClick={addSubject} style={S.btn("#10b981")}>+ Add</button>
+        <div style={{position:"relative",marginBottom:subjectError?6:16}}>
+          <div style={{display:"flex",gap:8}}>
+            <input
+              style={{...S.input,flex:1,margin:0}}
+              value={newSubject}
+              onChange={e=>{setNewSubject(e.target.value);setSubjectError("");setShowSuggestions(true);}}
+              onFocus={()=>setShowSuggestions(true)}
+              onKeyDown={e=>e.key==="Enter"&&addSubject()}
+              placeholder="Add new subject… (e.g. type 'phy')"
+            />
+            <button onClick={()=>addSubject()} style={S.btn("#10b981")}>+ Add</button>
+          </div>
+          {showSuggestions && suggestions.length>0 && (
+            <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,marginTop:4,zIndex:20,boxShadow:"0 8px 24px #00000018",maxHeight:220,overflowY:"auto"}}>
+              {suggestions.map(s=>(
+                <div key={s} onClick={()=>addSubject(s)} style={{padding:"10px 14px",cursor:"pointer",fontSize:13,color:"#374151",borderBottom:"1px solid #f1f5f9"}}>{s}</div>
+              ))}
+            </div>
+          )}
         </div>
+        {subjectError && <div style={{color:"#ef4444",fontSize:12,fontWeight:600,marginBottom:16}}>⚠️ {subjectError}</div>}
         {subjects.length===0&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No subjects. Add one above.</div>}
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {subjects.map((sub,i)=>(
@@ -3221,6 +3251,26 @@ function ReceiptInvoice({ students, classes, terms, school, user, logoDataUrl })
     const receipt={...form,receipt_no,issued_by:user.full_name||"Principal",discount,
       items:form.items.map(function(it){return {...it,qty:Number(it.qty)||1,unit_price:Number(it.unit_price)||0};})};
     await generateReceiptPDF(receipt,selectedStudent,selectedClass,selectedTerm,school,logoDataUrl);
+    // Save the payment record so Analytics → Fees can show who has
+    // actually paid this term. Previously this only produced a PDF and
+    // never touched the database, so paid/unpaid counts were always 0.
+    try{
+      await db.post("receipts",{
+        student_id:form.student_id,
+        term_id:form.term_id,
+        school_id:school?.id,
+        receipt_no,
+        amount:total,
+        payment_method:form.payment_method,
+        date:form.date,
+        notes:form.notes||null,
+      });
+    }catch(e){
+      // Non-fatal: the receipt PDF was already generated and handed to
+      // the user. A failed save here shouldn't block that, but we
+      // surface it so payment tracking doesn't silently drift.
+      console.error("Failed to record receipt for analytics:", e);
+    }
     setGenerating(false);setSuccess(true);setTimeout(function(){setSuccess(false);},3000);
   };
 
@@ -3851,6 +3901,7 @@ function Analytics({ students, classes, teachers, terms, school }) {
   const [receipts, setReceipts] = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [activeTab, setActiveTab] = useState('attendance');
+  const [feesView, setFeesView] = useState('unpaid');
 
   const currentTerm = terms.find(t => t.is_current) || terms[0];
 
@@ -3948,9 +3999,10 @@ function Analytics({ students, classes, teachers, terms, school }) {
     }));
   })();
 
-  // ── Fee analytics
-  const termAttendance = receipts.filter(r => currentTerm && r.term_id === currentTerm.id);
-  const paidStudentIds = [...new Set(termAttendance.map(r => r.student_id))];
+  // ── Fee analytics — based on actual receipts issued this term
+  const termReceipts = receipts.filter(r => currentTerm && r.term_id === currentTerm.id);
+  const paidStudentIds = [...new Set(termReceipts.map(r => r.student_id))];
+  const paidStudents = students.filter(s => paidStudentIds.includes(s.id));
   const unpaidStudents = students.filter(s => !paidStudentIds.includes(s.id));
 
   const barColor = (val, max) => {
@@ -4151,17 +4203,41 @@ function Analytics({ students, classes, teachers, terms, school }) {
         <div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
             {[
-              {label:'Paid This Term',   value:paidStudentIds.length, color:'#10b981', bg:'#f0fdf4'},
-              {label:'Unpaid This Term', value:unpaidStudents.length, color:'#ef4444', bg:'#fef2f2'},
+              {label:'Paid This Term',   value:paidStudents.length, color:'#10b981', bg:'#f0fdf4', key:'paid'},
+              {label:'Unpaid This Term', value:unpaidStudents.length, color:'#ef4444', bg:'#fef2f2', key:'unpaid'},
             ].map(item=>(
-              <div key={item.label} style={{background:item.bg,border:`1.5px solid ${item.color}30`,borderRadius:12,padding:'16px 12px',textAlign:'center'}}>
+              <div key={item.label} onClick={()=>setFeesView(item.key)} style={{background:item.bg,border:`1.5px solid ${item.color}${feesView===item.key?'':'30'}`,borderRadius:12,padding:'16px 12px',textAlign:'center',cursor:'pointer',boxShadow:feesView===item.key?`0 0 0 2px ${item.color}`:'none'}}>
                 <div style={{fontSize:28,fontWeight:900,color:item.color}}>{item.value}</div>
                 <div style={{fontSize:11,color:item.color,fontWeight:700,marginTop:2}}>{item.label}</div>
               </div>
             ))}
           </div>
 
-          {unpaidStudents.length > 0 && (
+          {feesView==='paid' && (
+            <div style={{...S.card,padding:0,overflow:'hidden'}}>
+              <div style={{padding:'12px 16px',fontWeight:800,color:'#059669',borderBottom:'1px solid #f1f5f9',fontSize:13}}>
+                ✅ Students Who Have Paid This Term
+              </div>
+              {paidStudents.length===0 && <div style={{padding:'20px 16px',textAlign:'center',color:'#94a3b8',fontSize:13}}>No payments recorded yet this term. Issue a receipt under the Receipts tab to record one.</div>}
+              {paidStudents.slice(0,20).map((s,i)=>{
+                const cls=classes.find(c=>c.id===s.class_id);
+                return(
+                  <div key={s.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 16px',borderBottom:i<Math.min(paidStudents.length,20)-1?'1px solid #f1f5f9':'none'}}>
+                    <div>
+                      <div style={{fontWeight:700,color:'#1e293b',fontSize:13}}>{s.full_name}</div>
+                      <div style={{fontSize:11,color:'#64748b'}}>{cls?`${cls.name} ${cls.arm||''}`:'—'}</div>
+                    </div>
+                    <span style={{background:'#f0fdf4',color:'#10b981',borderRadius:20,padding:'3px 12px',fontWeight:800,fontSize:11}}>Paid</span>
+                  </div>
+                );
+              })}
+              {paidStudents.length > 20 && (
+                <div style={{padding:'10px 16px',textAlign:'center',fontSize:12,color:'#94a3b8'}}>+{paidStudents.length-20} more</div>
+              )}
+            </div>
+          )}
+
+          {feesView==='unpaid' && unpaidStudents.length > 0 && (
             <div style={{...S.card,padding:0,overflow:'hidden'}}>
               <div style={{padding:'12px 16px',fontWeight:800,color:'#ef4444',borderBottom:'1px solid #f1f5f9',fontSize:13}}>
                 ⚠️ Students with No Fee Record This Term
