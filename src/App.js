@@ -1863,11 +1863,17 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
         principal_remark:remark,
       }, "student_id,term_id");
       if(!result){ setRemarkSaveError('Could not save — check your connection and try again.'); }
-      setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
+      try{
+        setRemarks(await db.get("remarks",{term_id:selectedTerm,student_id:classStudents.map(s=>s.id)}));
+      }catch(refreshErr){
+        // Save itself succeeded even if this refresh fails — don't show
+        // a false error, the next normal reload will pick up the change.
+      }
     }catch(e){
       setRemarkSaveError('Could not save — check your connection and try again.');
+    }finally{
+      setSavingRemark(false);
     }
-    setSavingRemark(false);
   };
 
   const applyBulkRemark=async()=>{
