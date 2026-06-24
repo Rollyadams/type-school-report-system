@@ -853,7 +853,7 @@ function PromoteStudents({ students, classes, terms, reload }) {
 
 // ── Manage Students ────────────────────────────────────────────
 // ── CSV/Excel Import ──────────────────────────────────────────
-function StudentImport({ classes, schoolId, school, onDone }) {
+function StudentImport({ classes, schoolId, school, students, onDone }) {
   const [step, setStep]           = useState('upload'); // upload | preview | importing | done
   const [rows, setRows]           = useState([]);
   const [errors, setErrors]       = useState([]);
@@ -4661,4 +4661,3 @@ export default function App() {
 
   return <Login onLogin={handleLogin} onRegister={()=>setScreen("register")}/>;
 }
-
