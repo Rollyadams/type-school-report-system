@@ -4481,8 +4481,14 @@ function TeacherDash({ user, onLogout }) {
 
   useEffect(()=>{
     if(!selectedClass) return;
-    const cls=classes.find(c=>c.id===selectedClass);
-    setSubjects(getClassSubjects(cls));
+    // Fetch this class fresh rather than trusting `classes` from initial
+    // mount — that array can be stale if an admin updated the subject
+    // list after this session started, or if the teacher never switches
+    // tabs (so the tab-based refresh below never gets a chance to run).
+    db.get("classes",{id:selectedClass}).then(c=>{
+      const cls=c[0]||classes.find(c=>c.id===selectedClass);
+      setSubjects(getClassSubjects(cls));
+    });
     db.get("students",{class_id:selectedClass}).then(s=>{setStudents(s);setAllStudentsInClass(s);});
     setSelectedStudent(null);
   },[selectedClass]);
