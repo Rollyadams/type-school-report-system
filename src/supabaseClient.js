@@ -158,7 +158,16 @@ export const db = {
       return payload;
     }
     await ensureContext();
-    const { data, error } = await supabase.from(table).upsert(payload, { onConflict: col }).select().single();
+    let data, error;
+    try {
+      const result = await Promise.race([
+        supabase.from(table).upsert(payload, { onConflict: col }).select().single(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('db.upsert network timeout')), 10000)),
+      ]);
+      data = result.data; error = result.error;
+    } catch (e) {
+      error = e;
+    }
     if (error) {
       if (QUEUEABLE.includes(table)) {
         const cacheTable = CACHEABLE[table];
