@@ -4447,17 +4447,20 @@ function TeacherDash({ user, onLogout }) {
 
   useEffect(()=>{loadData();},[]);
 
-  // Re-fetch classes whenever the teacher returns to this tab, so admin
-  // edits to a class's subject list (made on another device/session)
-  // show up without the teacher needing to fully reload the page.
-  useEffect(()=>{
-    if(tab!=="results") return;
+  // Re-fetch classes whenever the teacher returns to this tab (or on
+  // first load), so admin edits to a class's subject list show up
+  // without the teacher needing to fully reload the page. This refreshes
+  // ALL of the teacher's assigned classes (important for multi-class
+  // teachers), not just whichever one happens to be selected.
+  const refreshMyClasses=useCallback(()=>{
     db.get("classes",{school_id:user.school_id}).then(c=>{
       const myClassIds=(user.class_ids&&user.class_ids.length)?user.class_ids:(user.class_id?[user.class_id]:[]);
       const filtered=myClassIds.length?c.filter(cls=>myClassIds.includes(cls.id)):c;
       setClasses(filtered);
     });
-  },[tab]);
+  },[user.school_id,user.class_ids,user.class_id]);
+
+  useEffect(()=>{ if(tab==="results") refreshMyClasses(); },[tab,refreshMyClasses]);
   const loadData=async()=>{
     setLoading(true);
     const schoolId=user.school_id;
@@ -4477,6 +4480,7 @@ function TeacherDash({ user, onLogout }) {
       fetch(schoolData.logo_url).then(r=>r.blob()).then(blob=>new Promise(res=>{const reader=new FileReader();reader.onload=()=>res(reader.result);reader.readAsDataURL(blob);})).then(setLogoDataUrl).catch(()=>{});
     }
     setLoading(false);
+    refreshMyClasses();
   };
 
   useEffect(()=>{
@@ -4584,7 +4588,7 @@ function TeacherDash({ user, onLogout }) {
           {myClassIds.map(cid=>{
             const c=classes.find(cl=>cl.id===cid);
             if(!c) return null;
-            const subs=NIGERIAN_SUBJECTS[c.name]||[];
+            const subs=getClassSubjects(c);
             return (
               <div key={cid} style={{marginBottom:6,paddingBottom:6,borderBottom:"1px solid #d1fae5"}}>
                 <div style={{fontWeight:700,color:"#1e293b",fontSize:13}}>{c.name} {c.arm||""}</div>
