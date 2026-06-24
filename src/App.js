@@ -1907,7 +1907,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
         {isPrincipal&&(
           <div style={{...S.card,marginBottom:16}}>
             <div style={{fontWeight:700,color:"#1e293b",marginBottom:8}}>🏛 Principal's Remark {!rem?.principal_remark&&<span style={{color:"#ef4444",fontSize:11}}>* Required before sending</span>} {savingRemark&&<span style={{color:"#6366f1",fontSize:11}}>· Saving…</span>}</div>
-            <textarea key={reportStudent.id+(rem?.id||'')} style={{...S.input,height:60,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Type remark or pick template below…"/>
+            <textarea key={reportStudent.id+'-'+(rem?.principal_remark||'')} style={{...S.input,height:60,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Type remark or pick template below…"/>
             {remarkSaveError && <div style={{color:"#ef4444",fontSize:11,marginTop:4,fontWeight:600}}>⚠️ {remarkSaveError}</div>}
             <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
               {REMARK_TEMPLATES.map(t=>(
