@@ -1385,13 +1385,16 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
 // Custom subjects override: key = class.id, value = string[]
 const customSubjectsStore = {};
 
-function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, onUpgrade }) {
+function ManageClasses({ classes: classesProp, reload, schoolId, students, terms, planInfo, onUpgrade }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({name:"",arm:"",level:""});
   const [selectedClass,setSelectedClass]=useState(null);
   const [newSubject,setNewSubject]=useState("");
   const [subjectError,setSubjectError]=useState("");
   const [showSuggestions,setShowSuggestions]=useState(false);
   const [savingSubjects,setSavingSubjects]=useState(false);
+  const [classesOverride,setClassesOverride]=useState(null);
+  const classes = classesOverride || classesProp;
+  useEffect(()=>{ setClassesOverride(null); }, [classesProp]);
   const [autoPromoting,setAutoPromoting]=useState(false);
   const [autoResult,setAutoResult]=useState(null);
   const levels=Object.keys(NIGERIAN_SUBJECTS);
@@ -1408,8 +1411,16 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
     const updated=await db.patch("classes",clsId,{subjects:newSubjectsList});
     setSavingSubjects(false);
     if(updated){
+      // Update local state directly instead of calling the global
+      // reload() — that re-fetches students/teachers/sessions/terms too
+      // and flips a top-level loading flag, which is unnecessary churn
+      // for a single class's subject list and was causing the editor
+      // to unexpectedly close back to the classes dashboard.
       setSelectedClass(prev=>prev&&prev.id===clsId?{...prev,subjects:newSubjectsList}:prev);
-      reload();
+      setClassesOverride(prev=>{
+        const base=prev||classes;
+        return base.map(c=>c.id===clsId?{...c,subjects:newSubjectsList}:c);
+      });
     }else{
       setSubjectError("Could not save — check your connection and try again.");
     }
@@ -4435,6 +4446,18 @@ function TeacherDash({ user, onLogout }) {
   const [loading,setLoading]=useState(true);
 
   useEffect(()=>{loadData();},[]);
+
+  // Re-fetch classes whenever the teacher returns to this tab, so admin
+  // edits to a class's subject list (made on another device/session)
+  // show up without the teacher needing to fully reload the page.
+  useEffect(()=>{
+    if(tab!=="results") return;
+    db.get("classes",{school_id:user.school_id}).then(c=>{
+      const myClassIds=(user.class_ids&&user.class_ids.length)?user.class_ids:(user.class_id?[user.class_id]:[]);
+      const filtered=myClassIds.length?c.filter(cls=>myClassIds.includes(cls.id)):c;
+      setClasses(filtered);
+    });
+  },[tab]);
   const loadData=async()=>{
     setLoading(true);
     const schoolId=user.school_id;
@@ -4822,5 +4845,3 @@ export default function App() {
 
   return <Login onLogin={handleLogin} onRegister={()=>setScreen("register")}/>;
 }
-
-
