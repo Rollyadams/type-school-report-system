@@ -1377,6 +1377,8 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
   const [selectedClass,setSelectedClass]=useState(null);
   const [customSubjects,setCustomSubjects]=useState({});
   const [newSubject,setNewSubject]=useState("");
+  const [subjectError,setSubjectError]=useState("");
+  const [showSuggestions,setShowSuggestions]=useState(false);
   const [autoPromoting,setAutoPromoting]=useState(false);
   const [autoResult,setAutoResult]=useState(null);
   const levels=Object.keys(NIGERIAN_SUBJECTS);
@@ -1456,8 +1458,6 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
   // ── Detail view: subjects editor ────────────────────────────
   if(selectedClass){
     const subjects=getSubjects(selectedClass);
-    const [subjectError,setSubjectError]=useState("");
-    const [showSuggestions,setShowSuggestions]=useState(false);
     const addSubject=(value)=>{
       const s=(value??newSubject).trim();
       if(!s){ setSubjectError("Type a subject name first."); return; }
@@ -1563,7 +1563,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         {classes.map(c=>(
           <div key={c.id} style={{position:"relative"}}>
-            <div onClick={()=>setSelectedClass(c)} style={{...S.card,padding:"14px 16px",marginBottom:0,cursor:"pointer",transition:"transform 0.15s"}}
+            <div onClick={()=>{setSelectedClass(c);setNewSubject("");setSubjectError("");setShowSuggestions(false);}} style={{...S.card,padding:"14px 16px",marginBottom:0,cursor:"pointer",transition:"transform 0.15s"}}
               onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.02)";}}
               onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";}}>
               <div style={{fontWeight:800,color:"#1e293b",fontSize:15,paddingRight:24}}>{c.name} {c.arm}</div>
