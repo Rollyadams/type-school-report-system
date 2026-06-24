@@ -969,14 +969,15 @@ function StudentImport({ classes, schoolId, school, students, onDone }) {
 
   const validateRows = () => {
     const errs = [];
+    const badRowIndices = new Set();
     rows.forEach((row, i) => {
       const name = row[mapping.full_name]?.trim();
       const cls  = row[mapping.class_name]?.trim();
-      if (!name) errs.push(`Row ${i+2}: Missing student name`);
-      if (!cls)  errs.push(`Row ${i+2}: Missing class`);
-      else if (!resolveClass(cls)) errs.push(`Row ${i+2}: Class "${cls}" not found — create it first`);
+      if (!name) { errs.push(`Row ${i+2}: Missing student name`); badRowIndices.add(i); }
+      if (!cls)  { errs.push(`Row ${i+2}: Missing class`); badRowIndices.add(i); }
+      else if (!resolveClass(cls)) { errs.push(`Row ${i+2}: Class "${cls}" not found — create it first`); badRowIndices.add(i); }
     });
-    return errs;
+    return { errs, badRowIndices };
   };
 
   const genAdmNo = (index) => {
@@ -998,9 +999,11 @@ function StudentImport({ classes, schoolId, school, students, onDone }) {
 
   const [crashError, setCrashError] = useState('');
 
-  const runImport = async () => {
-    const errs = validateRows();
-    if (errs.length) { setErrors(errs); return; }
+  const [skippedCount, setSkippedCount] = useState(0);
+
+  const runImport = async (skipInvalid = false) => {
+    const { errs, badRowIndices } = validateRows();
+    if (errs.length && !skipInvalid) { setErrors(errs); return; }
     setErrors([]);
     setFailed([]);
     setCrashError('');
@@ -1010,8 +1013,10 @@ function StudentImport({ classes, schoolId, school, students, onDone }) {
     let failCount = 0;
     const failedRows = [];
     const startIdx = students?.length || 0;
+    const rowsToImport = skipInvalid ? rows.filter((_, i) => !badRowIndices.has(i)) : rows;
+    setSkippedCount(skipInvalid ? badRowIndices.size : 0);
     try {
-      for (const row of rows) {
+      for (const row of rowsToImport) {
         setCurrentRowName(row[mapping.full_name] || `Row ${count+2}`);
         const cls = resolveClass(row[mapping.class_name]?.trim());
         const admNo = row[mapping.admission_number]?.trim() || genAdmNo(startIdx + count + 1);
@@ -1032,7 +1037,7 @@ function StudentImport({ classes, schoolId, school, students, onDone }) {
           failedRows.push(`${row[mapping.full_name] || `Row ${count+2}`} (${e.message === 'timeout' ? 'timed out — check connection' : 'failed'})`);
         }
         count++;
-        setProgress(Math.round((count / rows.length) * 100));
+        setProgress(Math.round((count / rowsToImport.length) * 100));
         setImported(count - failCount);
       }
       setFailed(failedRows);
@@ -1877,10 +1882,10 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
         {isPrincipal&&(
           <div style={{...S.card,marginBottom:16}}>
             <div style={{fontWeight:700,color:"#1e293b",marginBottom:8}}>🏛 Principal's Remark {!rem?.principal_remark&&<span style={{color:"#ef4444",fontSize:11}}>* Required before sending</span>}</div>
-            <textarea style={{...S.input,height:60,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Type remark or pick template below…"/>
+            <textarea key={reportStudent.id+(rem?.id||'')} style={{...S.input,height:60,resize:"vertical"}} defaultValue={rem?.principal_remark||""} onBlur={e=>updatePrincipalRemark(reportStudent.id,e.target.value)} placeholder="Type remark or pick template below…"/>
             <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
               {REMARK_TEMPLATES.map(t=>(
-                <button key={t} onClick={()=>updatePrincipalRemark(reportStudent.id,t)} style={{background:"#f1f5f9",border:"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",color:"#475569"}}>{t}</button>
+                <button key={t} onClick={()=>updatePrincipalRemark(reportStudent.id,t)} style={{background:rem?.principal_remark===t?"#dbeafe":"#f1f5f9",border:rem?.principal_remark===t?"1px solid #6366f1":"1px solid #e2e8f0",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer",color:rem?.principal_remark===t?"#4338ca":"#475569",fontWeight:rem?.principal_remark===t?700:400}}>{t}</button>
               ))}
             </div>
             <div style={{fontSize:11,color:"#94a3b8",marginTop:6}}>Tap template to apply instantly. Or type and click outside.</div>
