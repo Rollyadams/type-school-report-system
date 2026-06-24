@@ -88,6 +88,13 @@ export function useSyncEngine() {
     return result;
   }, [refresh]);
 
+  const retry = useCallback(async () => {
+    setSyncing(true);
+    await retryFailed();
+    await refresh();
+    setSyncing(false);
+  }, [refresh]);
+
   useEffect(() => {
     refresh();
     const onOnline  = async () => { setOnline(true);  await flush(); };
@@ -102,7 +109,7 @@ export function useSyncEngine() {
     };
   }, [flush, refresh]);
 
-  return { online, pendingCount, failedCount, syncing, lastSync, flush, refresh, retryFailed };
+  return { online, pendingCount, failedCount, syncing, lastSync, flush, refresh, retryFailed: retry };
 }
 
 export async function seedCache(table, cacheTable, data) {
