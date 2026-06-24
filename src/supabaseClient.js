@@ -67,7 +67,16 @@ export const db = {
         query = Array.isArray(val) ? query.in(col, val) : query.eq(col, val);
       });
     }
-    const { data, error } = await query;
+    let data, error;
+    try {
+      const result = await Promise.race([
+        query,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('db.get network timeout')), 10000)),
+      ]);
+      data = result.data; error = result.error;
+    } catch (e) {
+      error = e;
+    }
     if (error) {
       if (cacheTable) { try { return await readCache(cacheTable, filters); } catch (e) {} }
       return [];
