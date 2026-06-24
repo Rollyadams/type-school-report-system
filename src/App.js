@@ -6,6 +6,19 @@ import * as Sentry from '@sentry/react';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
+// Single source of truth for "what subjects does this class have".
+// Checks the class's own `subjects` column first (set when a school
+// customizes a class's subject list) and falls back to the standard
+// Nigerian curriculum default for that class name. Used everywhere a
+// class's subject list is needed, so admin edits are visible to
+// teachers, report cards, and result entry consistently — not just on
+// whichever device made the edit.
+const getClassSubjects = (cls) => {
+  if (!cls) return [];
+  if (Array.isArray(cls.subjects) && cls.subjects.length) return cls.subjects;
+  return NIGERIAN_SUBJECTS[cls.name] || [];
+};
+
 // Emails listed here see developer-only diagnostics (e.g. the sync status
 // banner). Add your own login email here. School staff/principals will
 // never see this UI regardless of their role.
@@ -512,7 +525,7 @@ function Login({ onLogin, onRegister }) {
       const term=terms.find(t=>t.is_current);
       if(!term){setParentErr("No current term set by school");setParentLoading(false);return;}
       const cls=classes.find(c=>c.id===student.class_id);
-      const subjects=cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[];
+      const subjects=getClassSubjects(cls);
       const classmatesAll=await db.get("students",{class_id:student.class_id});
       const [results,allResults,attendance,remarks]=await Promise.all([
         db.get("results",{student_id:student.id,term_id:term.id}),
@@ -749,7 +762,7 @@ function PromoteStudents({ students, classes, terms, reload }) {
 
   const cls=classes.find(c=>c.id===selectedClass);
   const classStudents=students.filter(s=>s.class_id===selectedClass);
-  const subjects=cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[];
+  const subjects=getClassSubjects(cls);
   const nextClassName=cls?getNextClassName(cls.name):null;
   const nextClass=nextClassName?classes.find(c=>c.name===nextClassName):null;
 
@@ -1375,26 +1388,32 @@ const customSubjectsStore = {};
 function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, onUpgrade }) {
   const [adding,setAdding]=useState(false); const [form,setForm]=useState({name:"",arm:"",level:""});
   const [selectedClass,setSelectedClass]=useState(null);
-  const [customSubjects,setCustomSubjects]=useState({});
   const [newSubject,setNewSubject]=useState("");
   const [subjectError,setSubjectError]=useState("");
   const [showSuggestions,setShowSuggestions]=useState(false);
+  const [savingSubjects,setSavingSubjects]=useState(false);
   const [autoPromoting,setAutoPromoting]=useState(false);
   const [autoResult,setAutoResult]=useState(null);
   const levels=Object.keys(NIGERIAN_SUBJECTS);
   useBackOverride(()=>{ if(selectedClass){setSelectedClass(null);} else {setAdding(false);setForm({name:"",arm:"",level:""}); } }, adding||!!selectedClass);
 
-  // Load custom subjects from localStorage on mount
-  useEffect(()=>{
-    try{const saved=JSON.parse(localStorage.getItem("customSubjects_"+schoolId)||"{}");setCustomSubjects(saved);}catch(e){}
-  },[schoolId]);
+  const getSubjects=(cls)=> getClassSubjects(cls);
 
-  const saveCustomSubjects=(updated)=>{
-    setCustomSubjects(updated);
-    try{localStorage.setItem("customSubjects_"+schoolId,JSON.stringify(updated));}catch(e){}
+  // Persists this class's subject list to the database (classes.subjects)
+  // so every device/session sees the same list — admin edits now show up
+  // for teachers immediately, instead of being stuck in one browser's
+  // localStorage.
+  const saveSubjectsForClass=async(clsId,newSubjectsList)=>{
+    setSavingSubjects(true);
+    const updated=await db.patch("classes",clsId,{subjects:newSubjectsList});
+    setSavingSubjects(false);
+    if(updated){
+      setSelectedClass(prev=>prev&&prev.id===clsId?{...prev,subjects:newSubjectsList}:prev);
+      reload();
+    }else{
+      setSubjectError("Could not save — check your connection and try again.");
+    }
   };
-
-  const getSubjects=(cls)=> customSubjects[cls.id] || NIGERIAN_SUBJECTS[cls.name] || [];
 
   const save=async()=>{
     if(!form.name){alert("Please select a class level");return;}
@@ -1465,20 +1484,18 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
         setSubjectError(`"${s}" is already in this class's subject list.`);
         return;
       }
-      const updated={...customSubjects,[selectedClass.id]:[...subjects,s]};
-      saveCustomSubjects(updated); setNewSubject(""); setSubjectError(""); setShowSuggestions(false);
+      saveSubjectsForClass(selectedClass.id,[...subjects,s]);
+      setNewSubject(""); setSubjectError(""); setShowSuggestions(false);
     };
     const suggestions = newSubject.trim()
       ? ALL_SUBJECTS.filter(s=>s.toLowerCase().includes(newSubject.trim().toLowerCase()) && !subjects.some(ex=>ex.toLowerCase()===s.toLowerCase())).slice(0,6)
       : [];
     const removeSubject=(sub)=>{
-      const updated={...customSubjects,[selectedClass.id]:subjects.filter(s=>s!==sub)};
-      saveCustomSubjects(updated);
+      saveSubjectsForClass(selectedClass.id,subjects.filter(s=>s!==sub));
     };
     const resetSubjects=()=>{
       if(!window.confirm("Reset to default subjects for this class?")) return;
-      const updated={...customSubjects}; delete updated[selectedClass.id];
-      saveCustomSubjects(updated);
+      saveSubjectsForClass(selectedClass.id,null);
     };
     return(
       <div>
@@ -1489,7 +1506,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <div style={S.section("#0ea5e9")}><span>📚</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Subjects ({subjects.length})</span></div>
-          {customSubjects[selectedClass.id]&&<button onClick={resetSubjects} style={{...S.btn("#94a3b8"),padding:"5px 10px",fontSize:11}}>↺ Reset Default</button>}
+          {selectedClass.subjects&&selectedClass.subjects.length>0&&<button onClick={resetSubjects} disabled={savingSubjects} style={{...S.btn("#94a3b8"),padding:"5px 10px",fontSize:11,opacity:savingSubjects?0.6:1}}>↺ Reset Default</button>}
         </div>
         {/* Add subject input */}
         <div style={{position:"relative",marginBottom:subjectError?6:16}}>
@@ -1502,7 +1519,7 @@ function ManageClasses({ classes, reload, schoolId, students, terms, planInfo, o
               onKeyDown={e=>e.key==="Enter"&&addSubject()}
               placeholder="Add new subject… (e.g. type 'phy')"
             />
-            <button onClick={()=>addSubject()} style={S.btn("#10b981")}>+ Add</button>
+            <button onClick={()=>addSubject()} disabled={savingSubjects} style={{...S.btn("#10b981"),opacity:savingSubjects?0.6:1}}>{savingSubjects?"Saving…":"+ Add"}</button>
           </div>
           {showSuggestions && suggestions.length>0 && (
             <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1.5px solid #e2e8f0",borderRadius:10,marginTop:4,zIndex:20,boxShadow:"0 8px 24px #00000018",maxHeight:220,overflowY:"auto"}}>
@@ -1803,7 +1820,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
 
   const classStudents=students.filter(s=>s.class_id===selectedClass);
   const cls=classes.find(c=>c.id===selectedClass);
-  const subjects=cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[];
+  const subjects=getClassSubjects(cls);
   const term=terms.find(t=>t.id===selectedTerm);
 
   useEffect(()=>{
@@ -1851,7 +1868,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     setGenerating(student.id);
     try{
       const cls2=classes.find(c=>c.id===student.class_id);
-      const subs=cls2?(NIGERIAN_SUBJECTS[cls2.name]||[]):[];
+      const subs=getClassSubjects(cls2);
       const att=attendance.find(a=>a.student_id===student.id);
       const blob=await generateReportPDF(student,cls2,term,subs,results.filter(r=>r.student_id===student.id),att,rem,classStudents,results,school,logoDataUrl);
       await uploadAndSaveReport(blob,student,term,rem?.id,school?.id);
@@ -4442,7 +4459,7 @@ function TeacherDash({ user, onLogout }) {
   useEffect(()=>{
     if(!selectedClass) return;
     const cls=classes.find(c=>c.id===selectedClass);
-    setSubjects(cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[]);
+    setSubjects(getClassSubjects(cls));
     db.get("students",{class_id:selectedClass}).then(s=>{setStudents(s);setAllStudentsInClass(s);});
     setSelectedStudent(null);
   },[selectedClass]);
@@ -4507,7 +4524,7 @@ function TeacherDash({ user, onLogout }) {
     try{
       const cls=classes.find(c=>c.id===selectedClass);
       const term=terms.find(t=>t.id===selectedTerm);
-      const subs=cls?(NIGERIAN_SUBJECTS[cls.name]||[]):[];
+      const subs=getClassSubjects(cls);
       const allClassResults=await db.get("results",{term_id:selectedTerm,student_id:allStudentsInClass.map(s=>s.id)});
       // 1. Generate PDF blob
       const blob=await generateReportPDF(selectedStudent,cls,term,subs,currentResults,currentAttendance,currentRemarks,allStudentsInClass,allClassResults,school,logoDataUrl);
