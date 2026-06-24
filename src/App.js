@@ -996,45 +996,55 @@ function StudentImport({ classes, schoolId, school, onDone }) {
 
   const [currentRowName, setCurrentRowName] = useState('');
 
+  const [crashError, setCrashError] = useState('');
+
   const runImport = async () => {
     const errs = validateRows();
     if (errs.length) { setErrors(errs); return; }
     setErrors([]);
     setFailed([]);
+    setCrashError('');
     setImporting(true);
     setStep('importing');
     let count = 0;
     let failCount = 0;
     const failedRows = [];
     const startIdx = students?.length || 0;
-    for (const row of rows) {
-      setCurrentRowName(row[mapping.full_name] || `Row ${count+2}`);
-      const cls = resolveClass(row[mapping.class_name]?.trim());
-      const admNo = row[mapping.admission_number]?.trim() || genAdmNo(startIdx + count + 1);
-      try {
-        const result = await withTimeout(db.post('students', {
-          full_name:        sanitize(row[mapping.full_name]?.trim() || ''),
-          admission_number: admNo,
-          gender:           row[mapping.gender]?.trim() || '',
-          date_of_birth:    row[mapping.date_of_birth]?.trim() || '',
-          guardian_name:    sanitize(row[mapping.guardian_name]?.trim() || ''),
-          guardian_phone:   row[mapping.guardian_phone]?.trim() || '',
-          class_id:         cls?.id || null,
-          school_id:        schoolId,
-        }), 12000);
-        if (!result) { failCount++; failedRows.push(row[mapping.full_name] || `Row ${count+2}`); }
-      } catch (e) {
-        failCount++;
-        failedRows.push(`${row[mapping.full_name] || `Row ${count+2}`} (${e.message === 'timeout' ? 'timed out — check connection' : 'failed'})`);
+    try {
+      for (const row of rows) {
+        setCurrentRowName(row[mapping.full_name] || `Row ${count+2}`);
+        const cls = resolveClass(row[mapping.class_name]?.trim());
+        const admNo = row[mapping.admission_number]?.trim() || genAdmNo(startIdx + count + 1);
+        try {
+          const result = await withTimeout(db.post('students', {
+            full_name:        sanitize(row[mapping.full_name]?.trim() || ''),
+            admission_number: admNo,
+            gender:           row[mapping.gender]?.trim() || '',
+            date_of_birth:    row[mapping.date_of_birth]?.trim() || '',
+            guardian_name:    sanitize(row[mapping.guardian_name]?.trim() || ''),
+            guardian_phone:   row[mapping.guardian_phone]?.trim() || '',
+            class_id:         cls?.id || null,
+            school_id:        schoolId,
+          }), 12000);
+          if (!result) { failCount++; failedRows.push(row[mapping.full_name] || `Row ${count+2}`); }
+        } catch (e) {
+          failCount++;
+          failedRows.push(`${row[mapping.full_name] || `Row ${count+2}`} (${e.message === 'timeout' ? 'timed out — check connection' : 'failed'})`);
+        }
+        count++;
+        setProgress(Math.round((count / rows.length) * 100));
+        setImported(count - failCount);
       }
-      count++;
-      setProgress(Math.round((count / rows.length) * 100));
-      setImported(count - failCount);
+      setFailed(failedRows);
+      setImporting(false);
+      setStep('done');
+      onDone();
+    } catch (fatalErr) {
+      // Catches anything unexpected that escapes the per-row try/catch above,
+      // so the screen never freezes silently with no explanation.
+      setImporting(false);
+      setCrashError(fatalErr?.message || String(fatalErr) || 'Unknown error during import');
     }
-    setFailed(failedRows);
-    setImporting(false);
-    setStep('done');
-    onDone();
   };
 
   // ── Download template
@@ -1152,15 +1162,26 @@ function StudentImport({ classes, schoolId, school, onDone }) {
 
       {step === 'importing' && (
         <div style={{...S.card,textAlign:'center',padding:40}}>
-          <div style={{fontSize:36,marginBottom:16}}>⏳</div>
-          <div style={{fontWeight:800,color:'#1e293b',fontSize:15,marginBottom:8}}>Importing students…</div>
-          <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>{imported} of {rows.length} imported</div>
-          {currentRowName && <div style={{fontSize:11,color:'#94a3b8',marginBottom:16}}>Currently saving: {currentRowName}</div>}
-          <div style={{background:'#e2e8f0',borderRadius:99,height:10,overflow:'hidden',marginBottom:8}}>
-            <div style={{height:'100%',width:`${progress}%`,background:'linear-gradient(90deg,#6366f1,#10b981)',borderRadius:99,transition:'width 0.3s'}}/>
-          </div>
-          <div style={{fontSize:12,color:'#6366f1',fontWeight:700,marginBottom:20}}>{progress}%</div>
-          <div style={{fontSize:11,color:'#cbd5e1'}}>Taking too long? Each student has a built-in 12s timeout and will be skipped automatically.</div>
+          {crashError ? (
+            <>
+              <div style={{fontSize:36,marginBottom:16}}>⚠️</div>
+              <div style={{fontWeight:800,color:'#ef4444',fontSize:15,marginBottom:8}}>Import stopped unexpectedly</div>
+              <div style={{fontSize:12,color:'#64748b',marginBottom:20,wordBreak:'break-word'}}>{crashError}</div>
+              <button onClick={()=>{setStep('preview');setCrashError('');}} style={{...S.btn('#6366f1'),padding:'10px 24px',fontSize:13}}>← Back to Preview</button>
+            </>
+          ) : (
+            <>
+              <div style={{fontSize:36,marginBottom:16}}>⏳</div>
+              <div style={{fontWeight:800,color:'#1e293b',fontSize:15,marginBottom:8}}>Importing students…</div>
+              <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>{imported} of {rows.length} imported</div>
+              {currentRowName && <div style={{fontSize:11,color:'#94a3b8',marginBottom:16}}>Currently saving: {currentRowName}</div>}
+              <div style={{background:'#e2e8f0',borderRadius:99,height:10,overflow:'hidden',marginBottom:8}}>
+                <div style={{height:'100%',width:`${progress}%`,background:'linear-gradient(90deg,#6366f1,#10b981)',borderRadius:99,transition:'width 0.3s'}}/>
+              </div>
+              <div style={{fontSize:12,color:'#6366f1',fontWeight:700,marginBottom:20}}>{progress}%</div>
+              <div style={{fontSize:11,color:'#cbd5e1'}}>Taking too long? Each student has a built-in 12s timeout and will be skipped automatically.</div>
+            </>
+          )}
         </div>
       )}
 
