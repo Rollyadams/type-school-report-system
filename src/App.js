@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { db, supabase, activateUserContext, clearUserContext } from './supabaseClient';
 import { useSyncEngine } from './syncEngine';
 import { offlineDB } from './offlineDB';
@@ -326,15 +326,25 @@ const sharePDFFile = async (blob, student, term, guardianName) => {
   const fileName = `${student.full_name.replace(/ /g,"_")}_${term?.name||"Report"}.pdf`;
   const file = new File([blob], fileName, { type:"application/pdf" });
   const msg = `Dear ${guardianName||"Parent"}, please find attached the report card for ${student.full_name} — ${term?.name||""}.`;
-  if (navigator.share && navigator.canShare({ files:[file] })) {
-    await navigator.share({ files:[file], text:msg });
-  } else {
-    // Fallback: download + open WhatsApp text
+  const fallback = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href=url; a.download=fileName; a.click();
     URL.revokeObjectURL(url);
     const phone = student.guardian_phone?.replace(/\D/g,"");
     if (phone) window.open(`https://wa.me/234${phone.slice(-10)}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+  if (navigator.share && navigator.canShare && navigator.canShare({ files:[file] })) {
+    try {
+      await navigator.share({ files:[file], text:msg });
+    } catch (e) {
+      // The share sheet can be rejected if too much time passed between the
+      // tap and this call (e.g. slow PDF generation used up the browser's
+      // "user gesture" window) — fall back to download + WhatsApp link
+      // instead of surfacing a raw browser error to the user.
+      if (e?.name !== "AbortError") fallback();
+    }
+  } else {
+    fallback();
   }
 };
 
@@ -4563,7 +4573,7 @@ const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate, scale }
       <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
     </div>
   );
-});
+},(prev,next)=>prev.sub===next.sub&&prev.ca===next.ca&&prev.exam===next.exam&&prev.onUpdate===next.onUpdate&&prev.scale===next.scale);
 
 // ── Teacher Dashboard ──────────────────────────────────────────
 function TeacherDash({ user, onLogout }) {
@@ -4575,6 +4585,10 @@ function TeacherDash({ user, onLogout }) {
   const [selectedClass,setSelectedClass]=useState(""); const [selectedTerm,setSelectedTerm]=useState("");
   const [selectedStudent,setSelectedStudent]=useState(null); const [subjects,setSubjects]=useState([]);
   const [scores,setScores]=useState({}); const [attendance,setAttendance]=useState({days_present:"",total_days:""});
+  // Stable reference so ScoreRow's React.memo doesn't see a "new" scale on
+  // every keystroke (a fresh array each render defeated memoization and
+  // caused the on-screen keyboard to drop while typing in score fields).
+  const gradeScale=useMemo(()=>normalizeGradeScale(school?.grade_scale),[school?.grade_scale]);
   const updateScore=useCallback((sub,field,val)=>{
     const max=field==="ca"?40:60;
     const capped=Math.min(Math.max(Number(val)||0,0),max);
@@ -4669,35 +4683,43 @@ function TeacherDash({ user, onLogout }) {
     if(!liveRemark){setRemarkErr("Class teacher's remark is required before saving results.");return;}
     setRemarkErr("");
     setSaving(true);
-    const savedList=[];
-    for(const sub of subjects){
+    // All of these writes are independent of each other, so run them in
+    // parallel instead of one-at-a-time — sequential awaits here (one
+    // round-trip per subject, plus attendance, plus remark) was the cause
+    // of saves taking several seconds longer than necessary on mobile data.
+    const resultWrites = subjects.map(async sub=>{
       const sc=scores[sub]||{ca:0,exam:0};
       const caVal=Math.min(40,Math.max(0,Number(sc.ca)||0));
       const examVal=Math.min(60,Math.max(0,Number(sc.exam)||0));
-      if(sc.id) await db.patch("results",sc.id,{ca_score:caVal,exam_score:examVal});
-      else{
-        const ins=await db.post("results",{student_id:selectedStudent.id,term_id:selectedTerm,subject_name:sub,ca_score:caVal,exam_score:examVal});
-        if(ins) setScores(p=>({...p,[sub]:{...p[sub],id:ins.id}}));
-      }
-      savedList.push({subject_name:sub,ca_score:caVal,exam_score:examVal});
-    }
+      if(sc.id){ await db.patch("results",sc.id,{ca_score:caVal,exam_score:examVal}); return {subject_name:sub,ca_score:caVal,exam_score:examVal,id:sc.id}; }
+      const ins=await db.post("results",{student_id:selectedStudent.id,term_id:selectedTerm,subject_name:sub,ca_score:caVal,exam_score:examVal});
+      if(ins) setScores(p=>({...p,[sub]:{...p[sub],id:ins.id}}));
+      return {subject_name:sub,ca_score:caVal,exam_score:examVal,id:ins?.id};
+    });
     const dpVal=Number(attendance.days_present)||0; const tdVal=Number(attendance.total_days)||0;
-    if(attendance.id) await db.patch("attendance",attendance.id,{days_present:dpVal,total_days:tdVal});
-    else{const ins=await db.post("attendance",{student_id:selectedStudent.id,term_id:selectedTerm,days_present:dpVal,total_days:tdVal});if(ins)setAttendance(p=>({...p,id:ins.id}));}
-    if(remarks.id) await db.patch("remarks",remarks.id,{teacher_remark:liveRemark});
-    else{const ins=await db.post("remarks",{student_id:selectedStudent.id,term_id:selectedTerm,teacher_remark:liveRemark});if(ins)setRemarks(p=>({...p,id:ins.id}));}
-    setRemarks(p=>({...p,teacher_remark:liveRemark}));
+    const attendanceWrite=(async()=>{
+      if(attendance.id) await db.patch("attendance",attendance.id,{days_present:dpVal,total_days:tdVal});
+      else{const ins=await db.post("attendance",{student_id:selectedStudent.id,term_id:selectedTerm,days_present:dpVal,total_days:tdVal});if(ins)setAttendance(p=>({...p,id:ins.id}));}
+    })();
+    const remarkWrite=(async()=>{
+      if(remarks.id) await db.patch("remarks",remarks.id,{teacher_remark:liveRemark});
+      else{const ins=await db.post("remarks",{student_id:selectedStudent.id,term_id:selectedTerm,teacher_remark:liveRemark});if(ins)setRemarks(p=>({...p,id:ins.id}));}
+      setRemarks(p=>({...p,teacher_remark:liveRemark}));
+    })();
+    const [savedList]=await Promise.all([Promise.all(resultWrites),attendanceWrite,remarkWrite]);
     setCurrentResults(savedList.map(r=>({...r,student_id:selectedStudent.id,term_id:selectedTerm})));
-    // Post notification for principal
-    try{
-      const termName=(terms.find(t=>t.id===selectedTerm)||{}).name||"";
-      await db.post("notifications",{
-        school_id:school?school.id:null,
-        message:user.full_name+" saved results for "+selectedStudent.full_name+" ("+termName+")",
-        teacher_id:user.id,
-        read:false
-      });
-    }catch(e){}
+    // Post notification for principal — fire-and-forget, doesn't need to block "saved" feedback
+    (async()=>{
+      try{
+        const termName=(terms.find(t=>t.id===selectedTerm)||{}).name||"";
+        await db.post("notifications",{
+          school_id:school?school.id:null,
+          message:user.full_name+" saved results for "+selectedStudent.full_name+" ("+termName+")",
+          teacher_id:user.id,
+          read:false
+        });
+      }catch(e){}
+    })();
     setSaving(false);setSaved(true);
   };
 
@@ -4705,14 +4727,24 @@ function TeacherDash({ user, onLogout }) {
     if(!selectedStudent) return;
     setGenerating(true);
     try{
+      // Always check the freshest remark — block teachers from generating/
+      // sharing a report until the principal has added their remark, so
+      // results can't go to parents without principal sign-off.
+      const freshRemarks=await db.get("remarks",{student_id:selectedStudent.id,term_id:selectedTerm});
+      const latestRemark=freshRemarks[0]||currentRemarks;
+      if(!latestRemark?.principal_remark){
+        alert("⛔ Principal's remark required.\n\nThis report can't be shared until the principal adds their remark. Please check back after the principal reviews it.");
+        setGenerating(false);
+        return;
+      }
       const cls=classes.find(c=>c.id===selectedClass);
       const term=terms.find(t=>t.id===selectedTerm);
       const subs=getClassSubjects(cls);
       const allClassResults=await db.get("results",{term_id:selectedTerm,student_id:allStudentsInClass.map(s=>s.id)});
       // 1. Generate PDF blob
-      const blob=await generateReportPDF(selectedStudent,cls,term,subs,currentResults,currentAttendance,currentRemarks,allStudentsInClass,allClassResults,school,logoDataUrl);
+      const blob=await generateReportPDF(selectedStudent,cls,term,subs,currentResults,currentAttendance,latestRemark,allStudentsInClass,allClassResults,school,logoDataUrl);
       // 2. Upload to Supabase Storage + save URL
-      await uploadAndSaveReport(blob,selectedStudent,term,currentRemarks?.id,user.school_id);
+      await uploadAndSaveReport(blob,selectedStudent,term,latestRemark?.id,user.school_id);
       // 3. Share via native share sheet
       await sharePDFFile(blob,selectedStudent,term,selectedStudent.guardian_name);
     }catch(e){alert("Error: "+e.message);}
@@ -4780,7 +4812,7 @@ function TeacherDash({ user, onLogout }) {
           </div>
           {subjects.map(sub=>{
             const sc=scores[sub]||{ca:"",exam:""};
-            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore} scale={normalizeGradeScale(school?.grade_scale)}/>;
+            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore} scale={gradeScale}/>;
           })}
           <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
