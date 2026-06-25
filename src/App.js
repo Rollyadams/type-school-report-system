@@ -5008,13 +5008,26 @@ export default function App() {
     if(!last) return; // fresh login — key set by handleLogin, don't logout
     const elapsed=Date.now()-last;
     if(elapsed>=INACTIVITY_TIMEOUT_MS){ handleLogout(); return; }
-    if(elapsed>=INACTIVITY_TIMEOUT_MS-60000) setShowTimeoutWarning(true);
-    else setShowTimeoutWarning(false);
+    // Only update state when it actually needs to change — calling
+    // setShowTimeoutWarning unconditionally here re-renders the ENTIRE
+    // app on every check, which (combined with resetTimer firing on
+    // every tap/click/touch) was the actual cause of the on-screen
+    // keyboard dropping when moving between input fields.
+    setShowTimeoutWarning(prev=>{
+      const shouldShow=elapsed>=INACTIVITY_TIMEOUT_MS-60000;
+      return prev===shouldShow?prev:shouldShow;
+    });
   },[handleLogout]);
 
   const resetTimer=useCallback(()=>{
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
-    setShowTimeoutWarning(false);
+    // Functional update + bail-out when already false avoids triggering
+    // a re-render of the whole app on every single tap/click/touchstart —
+    // this fires globally on EVERY interaction, including tapping from
+    // one input into another, so an unconditional setState here was
+    // remounting/re-rendering the entire screen (and dropping the mobile
+    // keyboard) every time the user moved between score entry fields.
+    setShowTimeoutWarning(prev=>prev?false:prev);
     clearTimeout(timerRef.current); clearTimeout(warnRef.current);
     warnRef.current=setTimeout(()=>setShowTimeoutWarning(true), INACTIVITY_TIMEOUT_MS-60000);
     timerRef.current=setTimeout(()=>handleLogout(), INACTIVITY_TIMEOUT_MS);
