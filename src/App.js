@@ -133,14 +133,29 @@ const MESSAGE_TEMPLATES = {
   "Custom Message":       "",
 };
 
-const getGrade = (score) => {
-  if (score >= 90) return { g:"A",  r:"Outstanding",   col:"#059669" };
-  if (score >= 70) return { g:"B",  r:"Excellent",     col:"#10b981" };
-  if (score >= 60) return { g:"C",  r:"Very Good",     col:"#2563eb" };
-  if (score >= 50) return { g:"D",  r:"Good",          col:"#d97706" };
-  if (score >= 45) return { g:"E",  r:"Average",       col:"#ea580c" };
-  if (score >= 40) return { g:"F",  r:"Below Average", col:"#dc2626" };
-  return                   { g:"G",  r:"Fail",          col:"#7f1d1d" };
+const DEFAULT_GRADE_SCALE = [
+  { min: 90, g:"A", r:"Outstanding",   col:"#059669" },
+  { min: 70, g:"B", r:"Excellent",     col:"#10b981" },
+  { min: 60, g:"C", r:"Very Good",     col:"#2563eb" },
+  { min: 50, g:"D", r:"Good",          col:"#d97706" },
+  { min: 45, g:"E", r:"Average",       col:"#ea580c" },
+  { min: 40, g:"F", r:"Below Average", col:"#dc2626" },
+  { min: 0,  g:"G", r:"Fail",          col:"#7f1d1d" },
+];
+// Normalizes whatever is stored on `schools.grade_scale` (jsonb) into a sorted,
+// validated scale array. Falls back to DEFAULT_GRADE_SCALE if missing/invalid —
+// so schools that haven't configured one yet keep working exactly as before.
+const normalizeGradeScale = (raw) => {
+  if(!Array.isArray(raw) || !raw.length) return DEFAULT_GRADE_SCALE;
+  const cleaned = raw
+    .filter(r => r && typeof r.min === "number" && r.g)
+    .map(r => ({ min:r.min, g:r.g, r:r.r||r.g, col:r.col||"#6366f1" }))
+    .sort((a,b) => b.min - a.min);
+  return cleaned.length ? cleaned : DEFAULT_GRADE_SCALE;
+};
+const getGrade = (score, scale = DEFAULT_GRADE_SCALE) => {
+  for (const band of scale) { if (score >= band.min) return band; }
+  return scale[scale.length-1];
 };
 const ordinal = (n) => { const s=["th","st","nd","rd"],v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
 
@@ -169,6 +184,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
   const W = 210; let y = 0;
   const schoolName = school?.name || "School";
+  const scale = normalizeGradeScale(school?.grade_scale);
 
   doc.setFillColor(30,58,138); doc.rect(0,0,W,55,"F");
   if (logoDataUrl) { try { doc.addImage(logoDataUrl,"PNG",12,8,30,30); } catch(e){} }
@@ -203,7 +219,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   const subjectResults = subjects.map(sub => {
     const r = results.find(r=>r.subject_name===sub);
     const ca=r?.ca_score||0, exam=r?.exam_score||0, total=ca+exam;
-    return {sub,ca,exam,total,...getGrade(Math.round(total))};
+    return {sub,ca,exam,total,...getGrade(Math.round(total),scale)};
   });
   subjectResults.forEach((r,i)=>{
     if(y>250){doc.addPage();y=20;}
@@ -223,7 +239,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   y += 6;
   const totalMarks = subjectResults.reduce((a,r)=>a+r.total,0);
   const avg = subjectResults.length ? Math.round(totalMarks/subjectResults.length) : 0;
-  const overall = getGrade(avg);
+  const overall = getGrade(avg,scale);
   const getStudentTotal = (sid) => subjects.reduce((a,sub)=>{
     const r=allResults.find(r=>r.student_id===sid&&r.subject_name===sub);
     return a+(r?.ca_score||0)+(r?.exam_score||0);
@@ -620,13 +636,14 @@ function ParentResultView({ data, onBack }) {
   };
 
   const {term,results,allResults,attendance,remarks,subjects}=view;
+  const scale=normalizeGradeScale(school?.grade_scale);
   const sResults=subjects.map(sub=>{
     const r=results.find(r=>r.subject_name===sub);
     return {sub,ca:r?.ca_score||0,exam:r?.exam_score||0,total:(r?.ca_score||0)+(r?.exam_score||0)};
   });
   const totalMarks=sResults.reduce((a,r)=>a+r.total,0);
   const avg=sResults.length?Math.round(totalMarks/sResults.length):0;
-  const overall=getGrade(avg);
+  const overall=getGrade(avg,scale);
   const getStudentTotal=(sid)=>subjects.reduce((a,sub)=>{
     const r=allResults.find(r=>r.student_id===sid&&r.subject_name===sub);
     return a+(r?.ca_score||0)+(r?.exam_score||0);
@@ -698,7 +715,7 @@ function ParentResultView({ data, onBack }) {
                 {["Subject","CA","Exam","Total","Grade"].map(h=><div key={h} style={{fontSize:10,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>{h}</div>)}
               </div>
               {sResults.map((r,i)=>{
-                const g=getGrade(r.total);
+                const g=getGrade(r.total,scale);
                 return(
                   <div key={r.sub} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:6,padding:"8px 0",borderBottom:i<sResults.length-1?"1px solid #f1f5f9":"none",alignItems:"center"}}>
                     <div style={{fontWeight:600,fontSize:12,color:"#1e293b"}}>{r.sub}</div>
@@ -757,7 +774,7 @@ function SchoolSettings({ school, sessions, terms, students, classes, reload, sc
       </div>
       {subTab==="info"    &&<SchoolInfoForm school={school} reload={reload}/>}
       {subTab==="sessions"&&<ManageSessions sessions={sessions} terms={terms} reload={reload} schoolId={schoolId}/>}
-      {subTab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={reload}/>}
+      {subTab==="promote" &&<PromoteStudents students={students} classes={classes} terms={terms} reload={reload} school={school}/>}
     </div>
   );
 }
@@ -765,11 +782,33 @@ function SchoolSettings({ school, sessions, terms, students, classes, reload, sc
 function SchoolInfoForm({ school, reload }) {
   const [form,setForm]=useState({name:school?.name||"",address:school?.address||"",phone:school?.phone||"",email:school?.email||"",logo_url:school?.logo_url||""});
   const [saving,setSaving]=useState(false); const [saved,setSaved]=useState(false); const [uploading,setUploading]=useState(false);
+  const [gradeScale,setGradeScale]=useState(normalizeGradeScale(school?.grade_scale));
+  const [scaleErr,setScaleErr]=useState("");
+
+  const updateBand=(idx,field,value)=>{
+    setGradeScale(prev=>{
+      const next=[...prev];
+      next[idx]={...next[idx],[field]: field==="min" ? Number(value) : value};
+      return next;
+    });
+  };
+  const resetScale=()=>setGradeScale(DEFAULT_GRADE_SCALE.map(b=>({...b})));
 
   const save=async()=>{
+    // Validate: descending, unique mins, last band must be 0
+    const sorted=[...gradeScale].sort((a,b)=>b.min-a.min);
+    const mins=sorted.map(b=>b.min);
+    const hasDupes=new Set(mins).size!==mins.length;
+    const lastIsZero=sorted[sorted.length-1]?.min===0;
+    if(hasDupes||!lastIsZero||sorted.some(b=>!b.g.trim())){
+      setScaleErr("Check your grade scale: each grade needs a unique cutoff, a letter, and the lowest band must start at 0.");
+      return;
+    }
+    setScaleErr("");
     setSaving(true);
-    if(school?.id) await db.patch("schools",school.id,form);
-    else await db.post("schools",form);
+    const payload={...form, grade_scale: sorted};
+    if(school?.id) await db.patch("schools",school.id,payload);
+    else await db.post("schools",payload);
     setSaving(false); setSaved(true); setTimeout(()=>setSaved(false),3000); reload();
   };
 
@@ -805,6 +844,7 @@ function SchoolInfoForm({ school, reload }) {
           {uploading&&<div style={{color:"#6366f1",fontSize:13}}>Uploading…</div>}
           <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>Requires a "school-assets" public bucket in Supabase Storage.</div>
         </div>
+        <GradeScaleEditor gradeScale={gradeScale} updateBand={updateBand} resetScale={resetScale} scaleErr={scaleErr}/>
         {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,margin:"12px 0",textAlign:"center"}}>✅ Settings saved!</div>}
         <button onClick={save} disabled={saving} style={{...S.btn("#8b5cf6"),marginTop:12}}>{saving?"Saving…":"💾 Save Settings"}</button>
       </div>
@@ -812,8 +852,30 @@ function SchoolInfoForm({ school, reload }) {
   );
 }
 
+// ── Grading Scale (per-school, configurable) ─────────────────
+function GradeScaleEditor({ gradeScale, updateBand, resetScale, scaleErr }) {
+  return(
+    <div style={{...S.card,marginTop:16}}>
+      <div style={{fontWeight:800,fontSize:14,color:"#1e293b",marginBottom:4}}>📊 Grading Scale</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Set your school's own cutoffs for report cards. This is independent of WAEC/BECE exam grading — it only affects this school's termly results.</div>
+      <div style={{display:"grid",gridTemplateColumns:"70px 60px 1fr",gap:8,marginBottom:6,fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>
+        <div>Min %</div><div>Grade</div><div>Description</div>
+      </div>
+      {gradeScale.map((band,i)=>(
+        <div key={i} style={{display:"grid",gridTemplateColumns:"70px 60px 1fr",gap:8,marginBottom:6,alignItems:"center"}}>
+          <input type="number" min="0" max="100" style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.min} onChange={e=>updateBand(i,"min",e.target.value)} disabled={i===gradeScale.length-1}/>
+          <input style={{...S.input,padding:"6px 8px",fontSize:13,textAlign:"center"}} value={band.g} onChange={e=>updateBand(i,"g",e.target.value)} maxLength={2}/>
+          <input style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.r} onChange={e=>updateBand(i,"r",e.target.value)} placeholder="e.g. Excellent"/>
+        </div>
+      ))}
+      {scaleErr&&<div style={{color:"#ef4444",fontSize:12,fontWeight:600,marginTop:6}}>⚠️ {scaleErr}</div>}
+      <button onClick={resetScale} style={{...S.btn("#94a3b8"),fontSize:12,padding:"6px 12px",marginTop:8}}>↺ Reset to Default</button>
+    </div>
+  );
+}
+
 // ── Promote Students ───────────────────────────────────────────
-function PromoteStudents({ students, classes, terms, reload }) {
+function PromoteStudents({ students, classes, terms, reload, school }) {
   const [selectedClass,setSelectedClass]=useState("");
   const [selectedTerm,setSelectedTerm]=useState(terms.find(t=>t.is_current)?.id||"");
   const [results,setResults]=useState([]); const [remarks,setRemarks]=useState([]);
@@ -903,7 +965,7 @@ function PromoteStudents({ students, classes, terms, reload }) {
             </div>
           )}
           {classStudents.map(s=>{
-            const avg=getAvg(s.id); const g=getGrade(avg); const status=promotionMap[s.id]||"Promoted";
+            const avg=getAvg(s.id); const g=getGrade(avg,normalizeGradeScale(school?.grade_scale)); const status=promotionMap[s.id]||"Promoted";
             return(
               <div key={s.id} style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8}}>
                 <div>
@@ -1882,6 +1944,7 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
 
 // ── View Results (Principal) ───────────────────────────────────
 function ViewResults({ students, classes, terms, school, isPrincipal }) {
+  const scale=normalizeGradeScale(school?.grade_scale);
   const [selectedClass,setSelectedClass]=useState("");
   const [selectedTerm,setSelectedTerm]=useState(terms.find(t=>t.is_current)?.id||"");
   const [results,setResults]=useState([]); const [attendance,setAttendance]=useState([]); const [remarks,setRemarks]=useState([]);
@@ -1934,10 +1997,14 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
   const [bulkRemarkTarget,setBulkRemarkTarget]=useState("class");
 
   const handleGenerate=async(student)=>{
-    const rem=remarks.find(r=>r.student_id===student.id);
-    if(!rem?.principal_remark){alert("⛔ Principal's remark required before sending.\n\nAdd a remark for this student first.");return;}
     setGenerating(student.id);
     try{
+      // Always pull the freshest remark from the DB right before generating —
+      // in-memory `remarks` state can be stale if a save (onBlur) is still
+      // in flight when this is clicked, which previously baked old remarks into the PDF.
+      const freshRemarks=await db.get("remarks",{student_id:student.id,term_id:selectedTerm});
+      const rem=freshRemarks[0]||remarks.find(r=>r.student_id===student.id);
+      if(!rem?.principal_remark){setGenerating(null);alert("⛔ Principal's remark required before sending.\n\nAdd a remark for this student first.");return;}
       const cls2=classes.find(c=>c.id===student.class_id);
       const subs=getClassSubjects(cls2);
       const att=attendance.find(a=>a.student_id===student.id);
@@ -2013,13 +2080,13 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     const totalMarks=sResults.reduce((a,r)=>a+r.total,0);
     const avg=sResults.length?Math.round(totalMarks/sResults.length):0;
     const pos=getPosition(reportStudent.id);
-    const overall=getGrade(avg);
+    const overall=getGrade(avg,scale);
     const promotionStatus=rem?.promotion_status||(avg>=40?"Promoted":"Repeated");
     return(
       <div>
         <div style={{display:"flex",gap:8,padding:"12px 0",flexWrap:"wrap"}}>
           <button onClick={()=>setReportStudent(null)} style={S.btn("#64748b")}>← Back</button>
-          <button onClick={()=>window.print()} style={S.btn("#10b981")}>🖨 Print</button>
+          <button onClick={()=>{ if(isPrincipal&&!rem?.principal_remark){alert("⛔ Principal's remark required before printing.\n\nAdd a remark for this student first.");return;} window.print(); }} style={S.btn("#10b981")}>🖨 Print</button>
           <button onClick={()=>handleGenerate(reportStudent)} disabled={!!generating} style={S.btn("#25d366")}>{generating===reportStudent.id?"⏳ Generating…":"📤 PDF & Share"}</button>
         </div>
         {isPrincipal&&(
@@ -2060,7 +2127,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               </tr></thead>
               <tbody>
                 {sResults.map((r,i)=>{
-                  const g=getGrade(r.total);
+                  const g=getGrade(r.total,scale);
                   return(<tr key={r.subject} style={{background:i%2===0?"#fff":"#f8faff"}}>
                     <td style={{padding:"7px 4px",fontWeight:700,color:"#1e293b",fontSize:11}}>{r.subject}</td>
                     <td style={{padding:"7px 4px",textAlign:"center",color:"#475569",fontSize:11}}>{r.ca}</td>
@@ -2165,7 +2232,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
         const sRes=getStudentResults(s.id);
         const total=sRes.reduce((a,r)=>a+r.total,0);
         const avg=sRes.length?Math.round(total/sRes.length):0;
-        const g=getGrade(avg); const pos=getPosition(s.id);
+        const g=getGrade(avg,scale); const pos=getPosition(s.id);
         const rem=remarks.find(r=>r.student_id===s.id);
         return(
           <div key={s.id} style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8}}>
@@ -4481,9 +4548,9 @@ function PreviousResultsButton({ studentId, terms, currentTermId, classes, schoo
 }
 
 // ── Stable score row — uncontrolled inputs, saves only on blur ──
-const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate }) {
+const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate, scale }) {
   const total=(Number(ca)||0)+(Number(exam)||0);
-  const g=getGrade(total);
+  const g=getGrade(total,scale);
   return(
     <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
       <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
@@ -4515,6 +4582,8 @@ function TeacherDash({ user, onLogout }) {
   },[]);
   const [remarks,setRemarks]=useState({teacher_remark:""}); const [saving,setSaving]=useState(false);
   const [saved,setSaved]=useState(false); const [generating,setGenerating]=useState(false);
+  const teacherRemarkRef=useRef(null);
+  const [remarkErr,setRemarkErr]=useState("");
   const [currentResults,setCurrentResults]=useState([]); const [currentAttendance,setCurrentAttendance]=useState(null);
   const [currentRemarks,setCurrentRemarks]=useState(null); const [logoDataUrl,setLogoDataUrl]=useState(null);
   const [loading,setLoading]=useState(true);
@@ -4593,6 +4662,12 @@ function TeacherDash({ user, onLogout }) {
   const saveResults=async()=>{
     if(!selectedStudent){alert("Select a student");return;}
     if(!selectedTerm){alert("Select a term");return;}
+    // Read the textarea's live value directly (not just state) so a remark
+    // typed but not yet blurred still counts — closes the same race that
+    // could silently skip a remark if Save was clicked right after typing.
+    const liveRemark=(teacherRemarkRef.current?.value ?? remarks.teacher_remark ?? "").trim();
+    if(!liveRemark){setRemarkErr("Class teacher's remark is required before saving results.");return;}
+    setRemarkErr("");
     setSaving(true);
     const savedList=[];
     for(const sub of subjects){
@@ -4609,8 +4684,9 @@ function TeacherDash({ user, onLogout }) {
     const dpVal=Number(attendance.days_present)||0; const tdVal=Number(attendance.total_days)||0;
     if(attendance.id) await db.patch("attendance",attendance.id,{days_present:dpVal,total_days:tdVal});
     else{const ins=await db.post("attendance",{student_id:selectedStudent.id,term_id:selectedTerm,days_present:dpVal,total_days:tdVal});if(ins)setAttendance(p=>({...p,id:ins.id}));}
-    if(remarks.id) await db.patch("remarks",remarks.id,{teacher_remark:remarks.teacher_remark});
-    else{const ins=await db.post("remarks",{student_id:selectedStudent.id,term_id:selectedTerm,teacher_remark:remarks.teacher_remark});if(ins)setRemarks(p=>({...p,id:ins.id}));}
+    if(remarks.id) await db.patch("remarks",remarks.id,{teacher_remark:liveRemark});
+    else{const ins=await db.post("remarks",{student_id:selectedStudent.id,term_id:selectedTerm,teacher_remark:liveRemark});if(ins)setRemarks(p=>({...p,id:ins.id}));}
+    setRemarks(p=>({...p,teacher_remark:liveRemark}));
     setCurrentResults(savedList.map(r=>({...r,student_id:selectedStudent.id,term_id:selectedTerm})));
     // Post notification for principal
     try{
@@ -4704,7 +4780,7 @@ function TeacherDash({ user, onLogout }) {
           </div>
           {subjects.map(sub=>{
             const sc=scores[sub]||{ca:"",exam:""};
-            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore}/>;
+            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore} scale={normalizeGradeScale(school?.grade_scale)}/>;
           })}
           <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
@@ -4712,8 +4788,9 @@ function TeacherDash({ user, onLogout }) {
               <div><label style={S.label}>Days Present</label><input type="number" style={S.input} defaultValue={attendance.days_present} onBlur={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
               <div><label style={S.label}>Total School Days</label><input type="number" style={S.input} defaultValue={attendance.total_days} onBlur={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
             </div>
-            <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>💬 Class Teacher's Remark</div>
-            <textarea style={{...S.input,height:70,resize:"vertical",marginBottom:16}} defaultValue={remarks.teacher_remark} onBlur={e=>setRemarks(p=>({...p,teacher_remark:e.target.value}))} placeholder="Enter your remarks…"/>
+            <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>💬 Class Teacher's Remark <span style={{color:"#ef4444",fontWeight:700}}>*Required before saving</span></div>
+            <textarea ref={teacherRemarkRef} style={{...S.input,height:70,resize:"vertical",marginBottom:remarkErr?4:16}} defaultValue={remarks.teacher_remark} onBlur={e=>{setRemarks(p=>({...p,teacher_remark:e.target.value}));if(e.target.value.trim())setRemarkErr("");}} placeholder="Enter your remarks…"/>
+            {remarkErr&&<div style={{color:"#ef4444",fontSize:12,fontWeight:600,marginBottom:16}}>⚠️ {remarkErr}</div>}
           </div>
           {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
           <div style={{display:"flex",gap:10,flexDirection:"column"}}>
@@ -4929,4 +5006,3 @@ export default function App() {
 
   return <Login onLogin={handleLogin} onRegister={()=>setScreen("register")}/>;
 }
-
