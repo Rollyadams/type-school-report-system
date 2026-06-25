@@ -4581,40 +4581,17 @@ function PreviousResultsButton({ studentId, terms, currentTermId, classes, schoo
 }
 
 // ── Stable score row — uncontrolled inputs, saves only on blur ──
-// ── TEMP DIAGNOSTIC (remove after debugging keyboard-drop issue) ──
-window.__krLog = window.__krLog || [];
-const krLog = (msg) => {
-  const t = new Date().toISOString().slice(11,23);
-  window.__krLog.push(`${t} ${msg}`);
-  if (window.__krLog.length > 40) window.__krLog.shift();
-  if (window.__krSetLog) window.__krSetLog([...window.__krLog]);
-};
-function DebugOverlay() {
-  const [log, setLog] = useState([]);
-  useEffect(() => { window.__krSetLog = setLog; return () => { window.__krSetLog = null; }; }, []);
-  return (
-    <div style={{position:"fixed",bottom:0,left:0,right:0,maxHeight:"40vh",overflowY:"auto",background:"rgba(0,0,0,0.92)",color:"#0f0",fontSize:9,fontFamily:"monospace",padding:8,zIndex:99999,whiteSpace:"pre-wrap"}}>
-      <div style={{color:"#fff",fontWeight:700,marginBottom:4}}>🐛 DEBUG LOG (tap a score field, then tap another)</div>
-      {log.map((l,i)=><div key={i}>{l}</div>)}
-    </div>
-  );
-}
-
 const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate, scale, locked }) {
-  useEffect(()=>{ krLog(`MOUNT ${sub}`); return ()=>krLog(`UNMOUNT ${sub}`); },[]);
-  krLog(`render ${sub}`);
   const total=(Number(ca)||0)+(Number(exam)||0);
   const g=getGrade(total,scale);
   return(
     <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:locked?"#f1f5f9":"#f8fafc",borderRadius:10,padding:"10px 12px",opacity:locked?0.75:1}}>
       <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
       <input type="text" inputMode="numeric" pattern="[0-9]*" min="0" max="40" defaultValue={ca} disabled={locked}
-        onFocus={()=>krLog(`FOCUS ${sub}-ca`)}
-        onBlur={e=>{krLog(`BLUR ${sub}-ca val=${e.target.value}`);onUpdate(sub,"ca",e.target.value);}}
+        onBlur={e=>onUpdate(sub,"ca",e.target.value)}
         placeholder="0–40" style={{...S.input,padding:"7px 10px",cursor:locked?"not-allowed":"text"}}/>
       <input type="text" inputMode="numeric" pattern="[0-9]*" min="0" max="60" defaultValue={exam} disabled={locked}
-        onFocus={()=>krLog(`FOCUS ${sub}-exam`)}
-        onBlur={e=>{krLog(`BLUR ${sub}-exam val=${e.target.value}`);onUpdate(sub,"exam",e.target.value);}}
+        onBlur={e=>onUpdate(sub,"exam",e.target.value)}
         placeholder="0–60" style={{...S.input,padding:"7px 10px",cursor:locked?"not-allowed":"text"}}/>
       <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
     </div>
@@ -4806,7 +4783,7 @@ function TeacherDash({ user, onLogout }) {
 
   const myClassIds = (user.class_ids && user.class_ids.length) ? user.class_ids : (user.class_id ? [user.class_id] : []);
 
-  const TeacherResults = () => (
+  const teacherResultsJsx = (
     <div>
       <div style={S.section("#0ea5e9")}><span>📝</span><span style={{fontWeight:800,color:"#0ea5e9"}}>Enter Student Results</span></div>
       {!myClassIds.length&&<div style={{background:"#fff7ed",border:"1.5px solid #fed7aa",borderRadius:10,padding:"10px 16px",marginBottom:16,fontSize:13,color:"#92400e",fontWeight:600}}>⚠️ No class assigned. Ask the Principal to assign you a class.</div>}
@@ -4889,15 +4866,12 @@ function TeacherDash({ user, onLogout }) {
   );
 
   return(
-    <>
     <SidebarLayout user={user} role="teacher" school={school} onLogout={onLogout} tabs={tabs} activeTab={tab} setActiveTab={setTab} loading={loading}>
-      {tab==="results"&&<TeacherResults/>}
+      {tab==="results"&&teacherResultsJsx}
       {tab==="attendance"&&<FeatureGate feature="attendance" school={school} onUpgrade={()=>{}}><DailyAttendance user={user} classes={classes} terms={terms} students={allSchoolStudents}/></FeatureGate>}
       {tab==="timetable" &&<Timetable user={user} classes={classes} school={school} isPrincipal={false}/>}
       {tab==="report"&&<ViewResults students={students} classes={classes.length?classes:[]} terms={terms} school={school} isPrincipal={false}/>}
     </SidebarLayout>
-    <DebugOverlay/>
-    </>
   );
 }
 
