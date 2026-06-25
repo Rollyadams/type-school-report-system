@@ -6,10 +6,21 @@ import * as Sentry from '@sentry/react';
 const supabaseUrl     = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 let _userId   = null;
 let _schoolId = null;
+
+// Custom fetch: stamps every single request with the current user id,
+// read fresh at call time. This removes the RPC-then-query race entirely —
+// identity arrives WITH the query, in the same request, every time.
+const fetchWithUserHeader = (url, options = {}) => {
+  const headers = new Headers(options.headers || {});
+  if (_userId) headers.set('x-app-user-id', _userId);
+  return fetch(url, { ...options, headers });
+};
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  global: { fetch: fetchWithUserHeader },
+});
 
 export function setUserContext(userId, schoolId) {
   _userId = userId; _schoolId = schoolId;
@@ -21,24 +32,10 @@ export function clearUserContext() {
 
 export async function activateUserContext(userId) {
   try {
+    _userId = userId; // set BEFORE the request so the header carries it
     const { data } = await supabase.from('users').select('id,school_id').eq('id', userId).single();
     if (data) { _userId = data.id; _schoolId = data.school_id; }
-    await supabase.rpc('set_user_context', { uid: userId });
   } catch (e) {}
-}
-
-async function ensureContext() {
-  if (!_userId) return;
-  try {
-    await Promise.race([
-      supabase.rpc('set_user_context', { uid: _userId }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('ensureContext timeout')), 5000)),
-    ]);
-  } catch (e) {
-    // Non-fatal: if context-setting hangs or fails, proceed anyway —
-    // RLS will simply reject the query below if context wasn't set,
-    // which db.post/get already handle as a normal error case.
-  }
 }
 
 const CACHEABLE = {
@@ -60,7 +57,6 @@ export const db = {
     if (!navigator.onLine && cacheTable) {
       try { return await readCache(cacheTable, filters); } catch (e) {}
     }
-    await ensureContext();
     let query = supabase.from(table).select('*');
     if (filters) {
       Object.entries(filters).forEach(([col, val]) => {
@@ -94,7 +90,6 @@ export const db = {
       await enqueue(table, 'insert', payload);
       return record;
     }
-    await ensureContext();
     let data, error;
     try {
       const result = await Promise.race([
@@ -131,7 +126,6 @@ export const db = {
       await enqueue(table, 'update', full);
       return full;
     }
-    await ensureContext();
     let data, error;
     try {
       const result = await Promise.race([
@@ -166,7 +160,6 @@ export const db = {
       await enqueue(table, 'upsert', payload, col);
       return payload;
     }
-    await ensureContext();
     let data, error;
     try {
       const result = await Promise.race([
@@ -194,7 +187,6 @@ export const db = {
   },
 
   delete: async (table, id) => {
-    await ensureContext();
     const { error } = await supabase.from(table).delete().eq('id', id);
     if (error) {
       console.error('db.delete error:', error.message);
