@@ -135,10 +135,10 @@ const MESSAGE_TEMPLATES = {
 
 const getGrade = (score) => {
   if (score >= 90) return { g:"A",  r:"Outstanding",   col:"#059669" };
-  if (score >= 80) return { g:"B",  r:"Excellent",     col:"#10b981" };
-  if (score >= 70) return { g:"C",  r:"Very Good",     col:"#2563eb" };
-  if (score >= 60) return { g:"D",  r:"Good",          col:"#d97706" };
-  if (score >= 50) return { g:"E",  r:"Average",       col:"#ea580c" };
+  if (score >= 70) return { g:"B",  r:"Excellent",     col:"#10b981" };
+  if (score >= 60) return { g:"C",  r:"Very Good",     col:"#2563eb" };
+  if (score >= 50) return { g:"D",  r:"Good",          col:"#d97706" };
+  if (score >= 45) return { g:"E",  r:"Average",       col:"#ea580c" };
   if (score >= 40) return { g:"F",  r:"Below Average", col:"#dc2626" };
   return                   { g:"G",  r:"Fail",          col:"#7f1d1d" };
 };
@@ -513,6 +513,7 @@ function Login({ onLogin, onRegister }) {
   const checkResult = async () => {
     if(!admNum.trim()){setParentErr("Enter admission number");return;}
     setParentLoading(true);setParentErr("");setParentData(null);
+    clearUserContext(); // parent is unauthenticated — never inherit a stale/leftover staff RLS context
     try{
       const students=await db.get("students",{admission_number:admNum.trim()});
       if(!students.length){setParentErr("No student found with that admission number");setParentLoading(false);return;}
@@ -602,6 +603,7 @@ function ParentResultView({ data, onBack }) {
     const term=allTerms.find(t=>t.id===termId);
     if(!term){return;}
     setSwitching(true);setSwitchErr("");
+    clearUserContext(); // unauthenticated parent session — never inherit stale RLS context
     try{
       const classmatesAll=await db.get("students",{class_id:student.class_id});
       const [results,allResults,attendance,remarks]=await Promise.all([
@@ -2717,7 +2719,10 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
 // ── Daily Attendance ────────────────────────────────────────────
 function DailyAttendance({ user, classes, terms, students: allStudents }) {
   const today = getLocalDate();
-  const [selectedClass, setSelectedClass] = useState(user.class_id || '');
+  const myClassIds = (user.class_ids && user.class_ids.length) ? user.class_ids : (user.class_id ? [user.class_id] : []);
+  const myClasses = classes.filter(c => myClassIds.includes(c.id));
+  const isAdminOrSingleClass = myClassIds.length <= 1;
+  const [selectedClass, setSelectedClass] = useState(myClassIds[0] || '');
   const [selectedDate, setSelectedDate]   = useState(today);
   const [records, setRecords]             = useState({});
   const [existingIds, setExistingIds]     = useState({});
@@ -2969,13 +2974,24 @@ function DailyAttendance({ user, classes, terms, students: allStudents }) {
         )}
       </div>
 
-      {/* Class selector (only if not assigned) */}
-      {!user.class_id && (
+      {/* Class selector: admins (no assigned class) choose from all classes;
+          teachers with 2+ assigned classes choose from their own classes;
+          teachers with exactly 1 class skip the picker entirely. */}
+      {myClassIds.length === 0 && (
         <div style={S.card}>
           <label style={S.label}>Class</label>
           <select style={S.input} value={selectedClass} onChange={e => setSelectedClass(e.target.value)}>
             <option value="">Choose class</option>
             {classes.map(c => <option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
+          </select>
+        </div>
+      )}
+      {myClassIds.length > 1 && (
+        <div style={S.card}>
+          <label style={S.label}>Class</label>
+          <select style={S.input} value={selectedClass} onChange={e => setSelectedClass(e.target.value)}>
+            <option value="">Choose class</option>
+            {myClasses.map(c => <option key={c.id} value={c.id}>{c.name} {c.arm}</option>)}
           </select>
         </div>
       )}
