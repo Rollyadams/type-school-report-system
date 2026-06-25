@@ -1376,6 +1376,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
   };
   const [form,setForm]=useState({full_name:"",admission_number:"",gender:"",date_of_birth:"",guardian_name:"",guardian_phone:"",class_id:""});
   const [adding,setAdding]=useState(false); const [search,setSearch]=useState("");
+  const [classFilter,setClassFilter]=useState("all");
   const debouncedSearch = useDebounce(search, 300);
   const [saving,setSaving]=useState(false); const [editId,setEditId]=useState(null);
   const [importing,setImporting]=useState(false);
@@ -1411,6 +1412,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
   };
   const filtered=students
     .filter(s=>s.full_name.toLowerCase().includes(debouncedSearch.toLowerCase()))
+    .filter(s=>classFilter==="all"||s.class_id===classFilter)
     .sort((a,b)=>{
       const clsA=classes.find(c=>c.id===a.class_id);
       const clsB=classes.find(c=>c.id===b.class_id);
@@ -1488,12 +1490,32 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
           </div>
         </div>
       )}
-      <input style={{...S.input,marginBottom:12}} placeholder="🔍 Search students…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <select style={{...S.input,maxWidth:200}} value={classFilter} onChange={e=>setClassFilter(e.target.value)}>
+          <option value="all">All Classes ({students.length})</option>
+          {[...classes].sort((a,b)=>{
+            const oa=CLASS_ORDER.indexOf(a.name); const ob=CLASS_ORDER.indexOf(b.name);
+            return (oa===-1?999:oa)-(ob===-1?999:ob);
+          }).map(c=>{
+            const count=students.filter(s=>s.class_id===c.id).length;
+            return <option key={c.id} value={c.id}>{c.name} {c.arm||""} ({count})</option>;
+          })}
+        </select>
+        <input style={{...S.input,flex:1}} placeholder="🔍 Search students…" value={search} onChange={e=>setSearch(e.target.value)}/>
+      </div>
       {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#94a3b8"}}>No students found.</div>}
-      {pageStudents.map(s=>{
+      {pageStudents.map((s,i)=>{
         const cls=classes.find(c=>c.id===s.class_id);
+        const prevCls=i>0?classes.find(c=>c.id===pageStudents[i-1].class_id):null;
+        const showHeader=classFilter==="all"&&(i===0||cls?.id!==prevCls?.id);
         return(
-          <div key={s.id} style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8}}>
+          <React.Fragment key={s.id}>
+            {showHeader&&(
+              <div style={{fontWeight:800,fontSize:13,color:"#6366f1",margin:"18px 0 8px",paddingBottom:6,borderBottom:"2px solid #e0e7ff"}}>
+                🏫 {cls?`${cls.name} ${cls.arm||""}`:"No Class Assigned"}
+              </div>
+            )}
+          <div style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8}}>
             <div>
               <div style={{fontWeight:700,color:"#1e293b"}}>{s.full_name}</div>
               <div style={{fontSize:12,color:"#64748b"}}>{cls?`${cls.name} ${cls.arm||""}`:"No class"} • {s.admission_number||"No ID"}</div>
@@ -1504,6 +1526,7 @@ function ManageStudents({ students, classes, reload, schoolId, school, planInfo,
               <button onClick={async()=>{if(window.confirm(`Delete ${s.full_name}?`)){await db.delete("students",s.id);reload();}}} style={{background:"#fee2e2",border:"none",borderRadius:8,color:"#ef4444",padding:"6px 12px",cursor:"pointer",fontSize:12,fontWeight:700}}>Delete</button>
             </div>
           </div>
+          </React.Fragment>
         );
       })}
       <Pagination page={page} totalPages={totalPages} setPage={setPage} total={total} pageSize={20}/>
@@ -4558,22 +4581,22 @@ function PreviousResultsButton({ studentId, terms, currentTermId, classes, schoo
 }
 
 // ── Stable score row — uncontrolled inputs, saves only on blur ──
-const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate, scale }) {
+const ScoreRow = React.memo(function ScoreRow({ sub, ca, exam, onUpdate, scale, locked }) {
   const total=(Number(ca)||0)+(Number(exam)||0);
   const g=getGrade(total,scale);
   return(
-    <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:"#f8fafc",borderRadius:10,padding:"10px 12px"}}>
+    <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8,alignItems:"center",background:locked?"#f1f5f9":"#f8fafc",borderRadius:10,padding:"10px 12px",opacity:locked?0.75:1}}>
       <div style={{fontWeight:600,fontSize:13,color:"#1e293b"}}>{sub}</div>
-      <input type="number" min="0" max="40" defaultValue={ca}
+      <input type="text" inputMode="numeric" pattern="[0-9]*" min="0" max="40" defaultValue={ca} disabled={locked}
         onBlur={e=>onUpdate(sub,"ca",e.target.value)}
-        placeholder="0–40" style={{...S.input,padding:"7px 10px"}}/>
-      <input type="number" min="0" max="60" defaultValue={exam}
+        placeholder="0–40" style={{...S.input,padding:"7px 10px",cursor:locked?"not-allowed":"text"}}/>
+      <input type="text" inputMode="numeric" pattern="[0-9]*" min="0" max="60" defaultValue={exam} disabled={locked}
         onBlur={e=>onUpdate(sub,"exam",e.target.value)}
-        placeholder="0–60" style={{...S.input,padding:"7px 10px"}}/>
+        placeholder="0–60" style={{...S.input,padding:"7px 10px",cursor:locked?"not-allowed":"text"}}/>
       <div style={{fontWeight:800,color:g.col,fontSize:15,textAlign:"center"}}>{total||"—"}</div>
     </div>
   );
-},(prev,next)=>prev.sub===next.sub&&prev.ca===next.ca&&prev.exam===next.exam&&prev.onUpdate===next.onUpdate&&prev.scale===next.scale);
+},(prev,next)=>prev.sub===next.sub&&prev.ca===next.ca&&prev.exam===next.exam&&prev.onUpdate===next.onUpdate&&prev.scale===next.scale&&prev.locked===next.locked);
 
 // ── Teacher Dashboard ──────────────────────────────────────────
 function TeacherDash({ user, onLogout }) {
@@ -4812,16 +4835,16 @@ function TeacherDash({ user, onLogout }) {
           </div>
           {subjects.map(sub=>{
             const sc=scores[sub]||{ca:"",exam:""};
-            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore} scale={gradeScale}/>;
+            return <ScoreRow key={sub} sub={sub} ca={sc.ca} exam={sc.exam} onUpdate={updateScore} scale={gradeScale} locked={saved}/>;
           })}
           <div style={{marginTop:20,borderTop:"2px solid #e0e7ff",paddingTop:16}}>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>📅 Attendance</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-              <div><label style={S.label}>Days Present</label><input type="number" style={S.input} defaultValue={attendance.days_present} onBlur={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
-              <div><label style={S.label}>Total School Days</label><input type="number" style={S.input} defaultValue={attendance.total_days} onBlur={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
+              <div><label style={S.label}>Days Present</label><input type="text" inputMode="numeric" pattern="[0-9]*" style={{...S.input,cursor:saved?"not-allowed":"text"}} disabled={saved} defaultValue={attendance.days_present} onBlur={e=>setAttendance(p=>({...p,days_present:e.target.value}))} placeholder="e.g. 58"/></div>
+              <div><label style={S.label}>Total School Days</label><input type="text" inputMode="numeric" pattern="[0-9]*" style={{...S.input,cursor:saved?"not-allowed":"text"}} disabled={saved} defaultValue={attendance.total_days} onBlur={e=>setAttendance(p=>({...p,total_days:e.target.value}))} placeholder="e.g. 62"/></div>
             </div>
             <div style={{fontWeight:800,color:"#1e293b",marginBottom:12}}>💬 Class Teacher's Remark <span style={{color:"#ef4444",fontWeight:700}}>*Required before saving</span></div>
-            <textarea ref={teacherRemarkRef} style={{...S.input,height:70,resize:"vertical",marginBottom:remarkErr?4:16}} defaultValue={remarks.teacher_remark} onBlur={e=>{setRemarks(p=>({...p,teacher_remark:e.target.value}));if(e.target.value.trim())setRemarkErr("");}} placeholder="Enter your remarks…"/>
+            <textarea ref={teacherRemarkRef} disabled={saved} style={{...S.input,height:70,resize:"vertical",marginBottom:remarkErr?4:16,cursor:saved?"not-allowed":"text"}} defaultValue={remarks.teacher_remark} onBlur={e=>{setRemarks(p=>({...p,teacher_remark:e.target.value}));if(e.target.value.trim())setRemarkErr("");}} placeholder="Enter your remarks…"/>
             {remarkErr&&<div style={{color:"#ef4444",fontSize:12,fontWeight:600,marginBottom:16}}>⚠️ {remarkErr}</div>}
           </div>
           {saved&&<div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:10,padding:"10px 16px",color:"#059669",fontWeight:700,marginBottom:12,textAlign:"center"}}>✅ Results saved!</div>}
