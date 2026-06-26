@@ -3674,9 +3674,18 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
 
-  const price     = billing === 'monthly' ? PLANS.pro.monthlyPrice : PLANS.pro.yearlyPrice;
+  const fullPrice = billing === 'monthly' ? PLANS.pro.monthlyPrice : PLANS.pro.yearlyPrice;
   const saving    = (PLANS.pro.monthlyPrice * 12) - PLANS.pro.yearlyPrice;
   const expiresIn = billing === 'monthly' ? 30 : 365;
+
+  // Referral credit: capped at 50% of this invoice. The school's available
+  // balance may exceed that — only the honored portion is shown/charged here.
+  // The webhook independently re-verifies and deducts the real balance,
+  // this is just what we SHOW and ask Paystack to charge.
+  const creditBalance   = school?.credit_balance || 0;
+  const maxRedeemable   = Math.floor(fullPrice * 0.5);
+  const creditApplied   = Math.min(creditBalance, maxRedeemable);
+  const price           = fullPrice - creditApplied;
 
   const handlePay = async () => {
     setLoading(true);
@@ -3689,10 +3698,11 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
       currency:  'NGN',
       ref:       `SRS-${school?.id?.slice(0,8)}-${Date.now()}`,
       metadata: {
-        school_id:   school?.id,
-        school_name: school?.name,
-        plan:        'pro',
+        school_id:        school?.id,
+        school_name:      school?.name,
+        plan:             'pro',
         billing,
+        credit_requested: creditApplied, // webhook re-verifies this, never trusts it blindly
       },
       onSuccess: async (transaction) => {
         // Webhook handles the DB update server-side.
@@ -3757,7 +3767,16 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
                   <div style={{fontWeight:800,fontSize:16,color:p.color}}>{p.name}</div>
                   {p.id==='free'
                     ? <div style={{fontSize:12,color:'#64748b',marginTop:2}}>Always free</div>
-                    : <div style={{marginTop:4}}><span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{(billing==='monthly'?p.monthlyPrice:p.yearlyPrice).toLocaleString('en-NG')}</span><span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':'year'}</span></div>
+                    : <div style={{marginTop:4}}>
+                        {creditApplied > 0 && (
+                          <div style={{fontSize:13,color:'#94a3b8',textDecoration:'line-through'}}>₦{fullPrice.toLocaleString('en-NG')}</div>
+                        )}
+                        <span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{price.toLocaleString('en-NG')}</span>
+                        <span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':'year'}</span>
+                        {creditApplied > 0 && (
+                          <div style={{fontSize:11,color:'#10b981',fontWeight:700,marginTop:2}}>🎁 ₦{creditApplied.toLocaleString('en-NG')} referral credit applied</div>
+                        )}
+                      </div>
                   }
                 </div>
                 {p.id==='pro'&&<span style={{background:'#6366f1',color:'#fff',borderRadius:20,padding:'3px 12px',fontSize:11,fontWeight:800}}>RECOMMENDED</span>}
@@ -3769,6 +3788,11 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
           <button onClick={handlePay} disabled={loading} style={{...S.btn('#6366f1'),width:'100%',padding:14,fontSize:15,marginTop:4}}>
             {loading ? 'Loading...' : `💳 Pay ₦${price.toLocaleString('en-NG')} — Upgrade to Pro`}
           </button>
+          {creditBalance > 0 && (
+            <div style={{textAlign:'center',fontSize:11,color:'#64748b',marginTop:6}}>
+              Referral balance: ₦{creditBalance.toLocaleString('en-NG')} {creditBalance > maxRedeemable && `(max ₦${maxRedeemable.toLocaleString('en-NG')} usable per invoice)`}
+            </div>
+          )}
           <div style={{textAlign:'center',fontSize:11,color:'#94a3b8',marginTop:10}}>🔒 Secured by Paystack · 256-bit SSL encryption</div>
         </>
       )}
