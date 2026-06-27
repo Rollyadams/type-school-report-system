@@ -134,26 +134,36 @@ const MESSAGE_TEMPLATES = {
 };
 
 const DEFAULT_GRADE_SCALE = [
-  { min: 90, g:"A", r:"Outstanding",   col:"#059669" },
-  { min: 70, g:"B", r:"Excellent",     col:"#10b981" },
-  { min: 60, g:"C", r:"Very Good",     col:"#2563eb" },
-  { min: 50, g:"D", r:"Good",          col:"#d97706" },
-  { min: 45, g:"E", r:"Average",       col:"#ea580c" },
-  { min: 40, g:"F", r:"Below Average", col:"#dc2626" },
-  { min: 0,  g:"G", r:"Fail",          col:"#7f1d1d" },
+  { min: 75, max: 100, g:"A", r:"Excellent (Distinction)", col:"#059669" },
+  { min: 70, max: 74,  g:"B", r:"Very Good",               col:"#10b981" },
+  { min: 65, max: 69,  g:"C", r:"Good",                    col:"#2563eb" },
+  { min: 50, max: 64,  g:"C", r:"Average (Credit)",        col:"#0891b2" },
+  { min: 40, max: 49,  g:"P", r:"Pass",                    col:"#d97706" },
+  { min: 0,  max: 39,  g:"F", r:"Fail",                    col:"#dc2626" },
 ];
 // Normalizes whatever is stored on `schools.grade_scale` (jsonb) into a sorted,
 // validated scale array. Falls back to DEFAULT_GRADE_SCALE if missing/invalid —
 // so schools that haven't configured one yet keep working exactly as before.
+// Supports both the new {min,max} format and legacy {min}-only rows (where max
+// is inferred from the next band up), so old saved data doesn't break.
 const normalizeGradeScale = (raw) => {
   if(!Array.isArray(raw) || !raw.length) return DEFAULT_GRADE_SCALE;
-  const cleaned = raw
+  let cleaned = raw
     .filter(r => r && typeof r.min === "number" && r.g)
-    .map(r => ({ min:r.min, g:r.g, r:r.r||r.g, col:r.col||"#6366f1" }))
+    .map(r => ({ min:r.min, max:typeof r.max==="number"?r.max:null, g:r.g, r:r.r||r.g, col:r.col||"#6366f1" }))
     .sort((a,b) => b.min - a.min);
+  // Backfill missing max from the band above (legacy single-box data).
+  cleaned = cleaned.map((band,i) => {
+    if (band.max != null) return band;
+    const above = cleaned[i-1];
+    return { ...band, max: above ? above.min - 1 : 100 };
+  });
   return cleaned.length ? cleaned : DEFAULT_GRADE_SCALE;
 };
 const getGrade = (score, scale = DEFAULT_GRADE_SCALE) => {
+  for (const band of scale) { if (score >= band.min && score <= (band.max ?? 100)) return band; }
+  // Fallback: if score doesn't cleanly fit any band (e.g. gaps in a custom
+  // scale), use the old >= min behavior so nothing silently breaks.
   for (const band of scale) { if (score >= band.min) return band; }
   return scale[scale.length-1];
 };
@@ -798,20 +808,21 @@ function SchoolInfoForm({ school, reload }) {
   const updateBand=(idx,field,value)=>{
     setGradeScale(prev=>{
       const next=[...prev];
-      next[idx]={...next[idx],[field]: field==="min" ? Number(value) : value};
+      next[idx]={...next[idx],[field]: (field==="min"||field==="max") ? Number(value) : value};
       return next;
     });
   };
   const resetScale=()=>setGradeScale(DEFAULT_GRADE_SCALE.map(b=>({...b})));
 
   const save=async()=>{
-    // Validate: descending, unique mins, last band must be 0
+    // Validate: descending by min, unique/non-overlapping ranges, lowest band starts at 0, highest ends at 100
     const sorted=[...gradeScale].sort((a,b)=>b.min-a.min);
-    const mins=sorted.map(b=>b.min);
-    const hasDupes=new Set(mins).size!==mins.length;
     const lastIsZero=sorted[sorted.length-1]?.min===0;
-    if(hasDupes||!lastIsZero||sorted.some(b=>!b.g.trim())){
-      setScaleErr("Check your grade scale: each grade needs a unique cutoff, a letter, and the lowest band must start at 0.");
+    const firstIsHundred=sorted[0]?.max===100;
+    const hasOverlap = sorted.some((b,i)=> i>0 && b.max >= sorted[i-1].min);
+    const hasInvalidRange = sorted.some(b=> b.min > b.max);
+    if(hasOverlap||hasInvalidRange||!lastIsZero||!firstIsHundred||sorted.some(b=>!b.g.trim())){
+      setScaleErr("Check your grade scale: ranges must not overlap, each needs a letter, the lowest band must start at 0% and the highest must end at 100%.");
       return;
     }
     setScaleErr("");
@@ -867,14 +878,15 @@ function GradeScaleEditor({ gradeScale, updateBand, resetScale, scaleErr }) {
   return(
     <div style={{...S.card,marginTop:16}}>
       <div style={{fontWeight:800,fontSize:14,color:"#1e293b",marginBottom:4}}>📊 Grading Scale</div>
-      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Set your school's own cutoffs for report cards. This is independent of WAEC/BECE exam grading — it only affects this school's termly results.</div>
-      <div style={{display:"grid",gridTemplateColumns:"70px 60px 1fr",gap:8,marginBottom:6,fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>
-        <div>Min %</div><div>Grade</div><div>Description</div>
+      <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Set your school's own score ranges for report cards. This is independent of WAEC/BECE exam grading — it only affects this school's termly results.</div>
+      <div style={{display:"grid",gridTemplateColumns:"55px 55px 90px 1fr",gap:8,marginBottom:6,fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>
+        <div>Min %</div><div>Max %</div><div>Grade</div><div>Description</div>
       </div>
       {gradeScale.map((band,i)=>(
-        <div key={i} style={{display:"grid",gridTemplateColumns:"70px 60px 1fr",gap:8,marginBottom:6,alignItems:"center"}}>
+        <div key={i} style={{display:"grid",gridTemplateColumns:"55px 55px 90px 1fr",gap:8,marginBottom:6,alignItems:"center"}}>
           <input type="number" min="0" max="100" style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.min} onChange={e=>updateBand(i,"min",e.target.value)} disabled={i===gradeScale.length-1}/>
-          <input style={{...S.input,padding:"6px 8px",fontSize:13,textAlign:"center"}} value={band.g} onChange={e=>updateBand(i,"g",e.target.value)} maxLength={2}/>
+          <input type="number" min="0" max="100" style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.max} onChange={e=>updateBand(i,"max",e.target.value)} disabled={i===0}/>
+          <input style={{...S.input,padding:"6px 8px",fontSize:13,textAlign:"center"}} value={band.g} onChange={e=>updateBand(i,"g",e.target.value)} maxLength={3}/>
           <input style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.r} onChange={e=>updateBand(i,"r",e.target.value)} placeholder="e.g. Excellent"/>
         </div>
       ))}
