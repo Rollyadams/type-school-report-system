@@ -879,17 +879,21 @@ function GradeScaleEditor({ gradeScale, updateBand, resetScale, scaleErr }) {
     <div style={{...S.card,marginTop:16}}>
       <div style={{fontWeight:800,fontSize:14,color:"#1e293b",marginBottom:4}}>📊 Grading Scale</div>
       <div style={{fontSize:12,color:"#64748b",marginBottom:12}}>Set your school's own score ranges for report cards. This is independent of WAEC/BECE exam grading — it only affects this school's termly results.</div>
-      <div style={{display:"grid",gridTemplateColumns:"55px 55px 90px 1fr",gap:8,marginBottom:6,fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>
-        <div>Min %</div><div>Max %</div><div>Grade</div><div>Description</div>
-      </div>
-      {gradeScale.map((band,i)=>(
-        <div key={i} style={{display:"grid",gridTemplateColumns:"55px 55px 90px 1fr",gap:8,marginBottom:6,alignItems:"center"}}>
-          <input type="number" min="0" max="100" style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.min} onChange={e=>updateBand(i,"min",e.target.value)} disabled={i===gradeScale.length-1}/>
-          <input type="number" min="0" max="100" style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.max} onChange={e=>updateBand(i,"max",e.target.value)} disabled={i===0}/>
-          <input style={{...S.input,padding:"6px 8px",fontSize:13,textAlign:"center"}} value={band.g} onChange={e=>updateBand(i,"g",e.target.value)} maxLength={3}/>
-          <input style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.r} onChange={e=>updateBand(i,"r",e.target.value)} placeholder="e.g. Excellent"/>
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+        <div style={{minWidth:380}}>
+          <div style={{display:"grid",gridTemplateColumns:"50px 50px 70px minmax(110px,1fr)",gap:6,marginBottom:6,fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase"}}>
+            <div>Min %</div><div>Max %</div><div>Grade</div><div>Description</div>
+          </div>
+          {gradeScale.map((band,i)=>(
+            <div key={i} style={{display:"grid",gridTemplateColumns:"50px 50px 70px minmax(110px,1fr)",gap:6,marginBottom:6,alignItems:"center"}}>
+              <input type="number" min="0" max="100" style={{...S.input,padding:"6px 4px",fontSize:13}} value={band.min} onChange={e=>updateBand(i,"min",e.target.value)} disabled={i===gradeScale.length-1}/>
+              <input type="number" min="0" max="100" style={{...S.input,padding:"6px 4px",fontSize:13}} value={band.max} onChange={e=>updateBand(i,"max",e.target.value)} disabled={i===0}/>
+              <input style={{...S.input,padding:"6px 4px",fontSize:13,textAlign:"center"}} value={band.g} onChange={e=>updateBand(i,"g",e.target.value)} maxLength={3}/>
+              <input style={{...S.input,padding:"6px 8px",fontSize:13}} value={band.r} onChange={e=>updateBand(i,"r",e.target.value)} placeholder="e.g. Excellent"/>
+            </div>
+          ))}
         </div>
-      ))}
+      </div>
       {scaleErr&&<div style={{color:"#ef4444",fontSize:12,fontWeight:600,marginTop:6}}>⚠️ {scaleErr}</div>}
       <button onClick={resetScale} style={{...S.btn("#94a3b8"),fontSize:12,padding:"6px 12px",marginTop:8}}>↺ Reset to Default</button>
     </div>
@@ -3589,7 +3593,7 @@ const PLANS = {
   },
   pro: {
     id:'pro', name:'Pro', color:'#6366f1',
-    monthlyPrice:10000, yearlyPrice:86000, termPrice:25000,
+    monthlyPrice:10000, yearlyPrice:86000, termPrice:28500,
     studentLimit:Infinity, teacherLimit:Infinity, classLimit:Infinity,
     features:['Unlimited students','Unlimited classes','PDF report cards','Daily attendance','Receipt & Invoice','WhatsApp messaging','Priority support'],
     locked:[],
