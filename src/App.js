@@ -3577,7 +3577,7 @@ const PLANS = {
   },
   pro: {
     id:'pro', name:'Pro', color:'#6366f1',
-    monthlyPrice:10000, yearlyPrice:86000,
+    monthlyPrice:10000, yearlyPrice:86000, termPrice:25000,
     studentLimit:Infinity, teacherLimit:Infinity, classLimit:Infinity,
     features:['Unlimited students','Unlimited classes','PDF report cards','Daily attendance','Receipt & Invoice','WhatsApp messaging','Priority support'],
     locked:[],
@@ -3674,27 +3674,34 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
 
-  const fullPrice = billing === 'monthly' ? PLANS.pro.monthlyPrice : PLANS.pro.yearlyPrice;
+  const fullPrice = billing === 'monthly' ? PLANS.pro.monthlyPrice
+                   : billing === 'termly'  ? PLANS.pro.termPrice
+                   : PLANS.pro.yearlyPrice;
   const saving    = (PLANS.pro.monthlyPrice * 12) - PLANS.pro.yearlyPrice;
-  const expiresIn = billing === 'monthly' ? 30 : 365;
+  const expiresIn = billing === 'monthly' ? 30 : billing === 'termly' ? 120 : 365;
 
   // Referral credit: capped at 50% of this invoice. The school's available
   // balance may exceed that — only the honored portion is shown/charged here.
   // The webhook independently re-verifies and deducts the real balance,
   // this is just what we SHOW and ask Paystack to charge.
-  const creditBalance   = school?.credit_balance || 0;
+  const creditBalance   = Number(school?.credit_balance) || 0;
   const maxRedeemable   = Math.floor(fullPrice * 0.5);
   const creditApplied   = Math.min(creditBalance, maxRedeemable);
   const price           = fullPrice - creditApplied;
 
   const handlePay = async () => {
+    const payerEmail = user?.email || school?.email;
+    if (!payerEmail || !payerEmail.includes('@')) {
+      alert('No valid email found for this account. Please update the school email under Settings before upgrading.');
+      return;
+    }
     setLoading(true);
     await loadPaystack();
     setLoading(false);
     const handler = window.PaystackPop.setup({
       key:       PAYSTACK_PUBLIC_KEY,
-      email:     user.email || school?.email,
-      amount:    price * 100,
+      email:     payerEmail,
+      amount:    Math.round(price) * 100,
       currency:  'NGN',
       ref:       `SRS-${school?.id?.slice(0,8)}-${Date.now()}`,
       metadata: {
@@ -3749,7 +3756,7 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
           <div style={{marginBottom:20}}>
             <div style={{textAlign:'center',fontSize:12,fontWeight:700,color:'#64748b',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Billing Period</div>
             <div style={{display:'flex',background:'#e2e8f0',borderRadius:14,padding:4,gap:4}}>
-              {[['monthly','Monthly',null],['yearly','Yearly',`Save ₦${saving.toLocaleString('en-NG')}`]].map(([val,label,badge])=>(
+              {[['monthly','Monthly',null],['termly','Per Term',null],['yearly','Yearly',`Save ₦${saving.toLocaleString('en-NG')}`]].map(([val,label,badge])=>(
                 <button key={val} onClick={()=>setBilling(val)}
                   style={{flex:1,padding:'12px 8px',border:'none',borderRadius:10,fontWeight:800,fontSize:14,cursor:'pointer',
                     background:billing===val?'#6366f1':'transparent',color:billing===val?'#fff':'#64748b',
@@ -3772,7 +3779,7 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
                           <div style={{fontSize:13,color:'#94a3b8',textDecoration:'line-through'}}>₦{fullPrice.toLocaleString('en-NG')}</div>
                         )}
                         <span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{price.toLocaleString('en-NG')}</span>
-                        <span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':'year'}</span>
+                        <span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':billing==='termly'?'term':'year'}</span>
                         {creditApplied > 0 && (
                           <div style={{fontSize:11,color:'#10b981',fontWeight:700,marginTop:2}}>🎁 ₦{creditApplied.toLocaleString('en-NG')} referral credit applied</div>
                         )}
