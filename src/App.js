@@ -3689,12 +3689,61 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
   const [billing, setBilling]   = useState('monthly');
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
+  const [promoInput, setPromoInput]   = useState('');
+  const [promoApplied, setPromoApplied] = useState(null); // { code, discount }
+  const [promoError, setPromoError]     = useState('');
+  const [promoChecking, setPromoChecking] = useState(false);
 
   const fullPrice = billing === 'monthly' ? PLANS.pro.monthlyPrice
                    : billing === 'termly'  ? PLANS.pro.termPrice
                    : PLANS.pro.yearlyPrice;
   const saving    = (PLANS.pro.monthlyPrice * 12) - PLANS.pro.yearlyPrice;
   const expiresIn = billing === 'monthly' ? 30 : billing === 'termly' ? 120 : 365;
+
+  // Drop any applied promo if the billing cycle changes — codes are scoped
+  // to a specific cycle (e.g. termly-only) and shouldn't silently carry over.
+  useEffect(() => { setPromoApplied(null); setPromoError(''); }, [billing]);
+
+  const checkPromoCode = async () => {
+    const code = promoInput.trim().toUpperCase();
+    if (!code) return;
+    setPromoChecking(true);
+    setPromoError('');
+    try {
+      const { data, error } = await supabase
+        .from('promo_codes')
+        .select('*')
+        .eq('code', code)
+        .eq('active', true)
+        .single();
+      if (error || !data) {
+        setPromoError('Invalid or expired promo code.');
+        setPromoApplied(null);
+        return;
+      }
+      if (data.billing_cycle !== billing) {
+        setPromoError(`This code only applies to the ${data.billing_cycle} plan.`);
+        setPromoApplied(null);
+        return;
+      }
+      if (new Date(data.valid_until) < new Date()) {
+        setPromoError('This promo code has expired.');
+        setPromoApplied(null);
+        return;
+      }
+      if (data.times_used >= data.max_uses) {
+        setPromoError('This promo code has already been used.');
+        setPromoApplied(null);
+        return;
+      }
+      setPromoApplied({ code: data.code, discount: Number(data.discount) });
+    } catch (e) {
+      setPromoError('Could not verify promo code. Try again.');
+      setPromoApplied(null);
+    } finally {
+      setPromoChecking(false);
+    }
+  };
 
   // Referral credit: capped at 50% of this invoice. The school's available
   // balance may exceed that — only the honored portion is shown/charged here.
@@ -3703,7 +3752,8 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
   const creditBalance   = Number(school?.credit_balance) || 0;
   const maxRedeemable   = Math.floor(fullPrice * 0.5);
   const creditApplied   = Math.min(creditBalance, maxRedeemable);
-  const price           = fullPrice - creditApplied;
+  const promoDiscount   = promoApplied?.discount || 0;
+  const price           = Math.max(0, fullPrice - creditApplied - promoDiscount);
 
   const handlePay = async () => {
     const payerEmail = user?.email || school?.email;
@@ -3726,6 +3776,7 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
         plan:             'pro',
         billing,
         credit_requested: creditApplied, // webhook re-verifies this, never trusts it blindly
+        promo_code:       promoApplied?.code || null, // webhook re-verifies and marks used
       },
       onSuccess: async (transaction) => {
         // Webhook handles the DB update server-side.
@@ -3791,13 +3842,16 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
                   {p.id==='free'
                     ? <div style={{fontSize:12,color:'#64748b',marginTop:2}}>Always free</div>
                     : <div style={{marginTop:4}}>
-                        {creditApplied > 0 && (
+                        {(creditApplied > 0 || promoDiscount > 0) && (
                           <div style={{fontSize:13,color:'#94a3b8',textDecoration:'line-through'}}>₦{fullPrice.toLocaleString('en-NG')}</div>
                         )}
                         <span style={{fontWeight:900,fontSize:20,color:'#1e293b'}}>₦{price.toLocaleString('en-NG')}</span>
                         <span style={{fontSize:12,color:'#64748b'}}>/{billing==='monthly'?'month':billing==='termly'?'term':'year'}</span>
                         {creditApplied > 0 && (
                           <div style={{fontSize:11,color:'#10b981',fontWeight:700,marginTop:2}}>🎁 ₦{creditApplied.toLocaleString('en-NG')} referral credit applied</div>
+                        )}
+                        {promoDiscount > 0 && (
+                          <div style={{fontSize:11,color:'#6366f1',fontWeight:700,marginTop:2}}>🏷️ ₦{promoDiscount.toLocaleString('en-NG')} promo applied ({promoApplied.code})</div>
                         )}
                       </div>
                   }
@@ -3808,6 +3862,26 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
               {p.locked.map(f=><div key={f} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',fontSize:13,color:'#94a3b8'}}><span style={{flexShrink:0}}>✗</span>{f}</div>)}
             </div>
           ))}
+          <div style={{marginBottom:12}}>
+            <div style={{display:'flex',gap:8}}>
+              <input
+                value={promoInput}
+                onChange={e=>{setPromoInput(e.target.value); setPromoError('');}}
+                placeholder="Have a promo code?"
+                style={{...S.input,flex:1,fontSize:13,textTransform:'uppercase'}}
+                disabled={!!promoApplied}
+              />
+              {promoApplied ? (
+                <button onClick={()=>{setPromoApplied(null); setPromoInput(''); setPromoError('');}} style={{...S.btn('#94a3b8'),fontSize:13,padding:'10px 16px'}}>Remove</button>
+              ) : (
+                <button onClick={checkPromoCode} disabled={promoChecking || !promoInput.trim()} style={{...S.btn('#6366f1'),fontSize:13,padding:'10px 16px'}}>
+                  {promoChecking ? '...' : 'Apply'}
+                </button>
+              )}
+            </div>
+            {promoError && <div style={{fontSize:11,color:'#ef4444',marginTop:4}}>{promoError}</div>}
+            {promoApplied && <div style={{fontSize:11,color:'#10b981',marginTop:4}}>✓ Promo "{promoApplied.code}" applied — ₦{promoApplied.discount.toLocaleString('en-NG')} off</div>}
+          </div>
           <button onClick={handlePay} disabled={loading} style={{...S.btn('#6366f1'),width:'100%',padding:14,fontSize:15,marginTop:4}}>
             {loading ? 'Loading...' : `💳 Pay ₦${price.toLocaleString('en-NG')} — Upgrade to Pro`}
           </button>
