@@ -3710,29 +3710,14 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
     setPromoChecking(true);
     setPromoError('');
     try {
-      const { data, error } = await supabase
-        .from('promo_codes')
-        .select('*')
-        .eq('code', code)
-        .eq('active', true)
-        .single();
-      if (error || !data) {
-        setPromoError('Invalid or expired promo code.');
-        setPromoApplied(null);
-        return;
-      }
-      if (data.billing_cycle !== billing) {
-        setPromoError(`This code only applies to the ${data.billing_cycle} plan.`);
-        setPromoApplied(null);
-        return;
-      }
-      if (new Date(data.valid_until) < new Date()) {
-        setPromoError('This promo code has expired.');
-        setPromoApplied(null);
-        return;
-      }
-      if (data.times_used >= data.max_uses) {
-        setPromoError('This promo code has already been used.');
+      // promo_codes is locked behind RLS with no public policies — this
+      // validates server-side via the validate-promo-code Edge Function
+      // instead of querying the table directly from the browser.
+      const { data, error } = await supabase.functions.invoke('validate-promo-code', {
+        body: { code, billing },
+      });
+      if (error || !data?.valid) {
+        setPromoError(data?.error || 'Invalid or expired promo code.');
         setPromoApplied(null);
         return;
       }
