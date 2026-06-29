@@ -3,7 +3,7 @@ import { db, supabase, activateUserContext, clearUserContext } from './supabaseC
 import { useSyncEngine } from './syncEngine';
 import { offlineDB } from './offlineDB';
 import * as Sentry from '@sentry/react';
-import SuperAdminDash from './SuperAdminDash';
+import SuperAdminDash, { AnnouncementBanners } from './SuperAdminDash';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
@@ -539,6 +539,15 @@ function Login({ onLogin, onRegister }) {
       if (!isHashed(storedPw)) {
         const upgraded = await hashPassword(pass);
         await supabase.from('users').update({ password: upgraded }).eq('id', users[0].id);
+      }
+      // Block login for staff of a deactivated school. super_admin has no
+      // school_id so this check never applies to that account.
+      if (users[0].school_id) {
+        const sc = await db.get('schools', { id: users[0].school_id });
+        if (sc[0]?.deactivated) {
+          setErr("This school's account has been deactivated. Contact support.");
+          setLoading(false); return;
+        }
       }
       await activateUserContext(users[0].id);
       const { password: _pw, ...safeUser } = users[0];
@@ -2761,6 +2770,8 @@ function SidebarLayout({ user, role, school, onLogout, tabs, activeTab, setActiv
 
       {/* ── Sync Status Banner — developer-only, hidden from school staff ── */}
       {DEV_EMAILS.includes(user?.email) && <SyncBanner />}
+      {/* ── Super Admin Announcements ── */}
+      <AnnouncementBanners role={role} onNavigate={setActiveTab} />
       {/* ── PWA Install Banner ── */}
       <InstallBanner />
 
