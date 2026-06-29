@@ -3,6 +3,7 @@ import { db, supabase, activateUserContext, clearUserContext } from './supabaseC
 import { useSyncEngine } from './syncEngine';
 import { offlineDB } from './offlineDB';
 import * as Sentry from '@sentry/react';
+import SuperAdminDash from './SuperAdminDash';
 
 const sanitize = (str) => typeof str === 'string' ? str.replace(/[<>"'`]/g, '').trim() : str;
 
@@ -5170,7 +5171,9 @@ export default function App() {
           <button onClick={resetTimer} style={{background:"#fff",color:"#1e3a8a",border:"none",borderRadius:8,padding:"4px 12px",fontWeight:800,cursor:"pointer",fontSize:12}}>Stay Logged In</button>
         </div>
       )}
-      {user.role==="principal"
+      {user.role==="super_admin"
+        ?<SuperAdminDash user={user} onLogout={handleLogout}/>
+        :user.role==="principal"
         ?<PrincipalDash user={user} onLogout={handleLogout}/>
         :<TeacherDash user={user} onLogout={handleLogout}/>}
     </>
