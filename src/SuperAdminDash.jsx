@@ -9,6 +9,7 @@ function SuperAdminLayout({ user, onLogout, tab, setTab, children }) {
   const tabs = [
     { id: 'schools', label: 'Schools', icon: '🏫' },
     { id: 'promos',  label: 'Promo Codes', icon: '🏷️' },
+    { id: 'announcements', label: 'Announcements', icon: '📢' },
   ];
   const grad = 'linear-gradient(135deg,#7c2d12,#b91c1c)'; // distinct from principal/teacher colors on purpose
   const accent = '#dc2626';
@@ -54,6 +55,10 @@ function SchoolsList() {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { school, typed }
+  const [actionErr, setActionErr] = useState('');
 
   useEffect(() => { load(); }, []);
   const load = async () => {
@@ -66,6 +71,7 @@ function SchoolsList() {
 
   const now = new Date();
   const statusFor = (school) => {
+    if (school.deactivated) return { label: 'Deactivated', color: '#78716c', bg: '#f5f5f4' };
     if (school.plan !== 'pro') return { label: 'Free / Trial', color: '#64748b', bg: '#f1f5f9' };
     const expires = school.plan_expires_at ? new Date(school.plan_expires_at) : null;
     if (!expires || expires <= now) return { label: 'Expired', color: '#dc2626', bg: '#fef2f2' };
@@ -79,6 +85,74 @@ function SchoolsList() {
     s.name?.toLowerCase().includes(search.toLowerCase()) ||
     s.email?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const toggleDeactivate = async (school) => {
+    setBusyId(school.id);
+    setActionErr('');
+    await db.patch('schools', school.id, { deactivated: !school.deactivated });
+    await load();
+    setBusyId(null);
+  };
+
+  // Permanent delete walks child tables in the order required by their
+  // FK delete rules. Tables with NO ACTION (referrals, referral_credit_ledger,
+  // terms) MUST be deleted explicitly first or the schools delete will be
+  // rejected outright by Postgres. Tables with CASCADE/SET NULL would be
+  // handled automatically, but we delete results/students explicitly too
+  // so nothing is silently orphaned.
+  const deleteSchoolPermanently = async (school) => {
+    setBusyId(school.id);
+    setActionErr('');
+    try {
+      const students = await db.get('students', { school_id: school.id });
+      const studentIds = students.map(s => s.id);
+
+      // results/remarks/attendance reference student_id, not school_id directly —
+      // clear them before removing students.
+      for (const sid of studentIds) {
+        const results = await db.get('results', { student_id: sid });
+        for (const r of results) await db.delete('results', r.id);
+        const remarks = await db.get('remarks', { student_id: sid });
+        for (const r of remarks) await db.delete('remarks', r.id);
+      }
+      for (const sid of studentIds) await db.delete('students', sid);
+
+      const referralsOut = await db.get('referrals', { referrer_school_id: school.id });
+      for (const r of referralsOut) await db.delete('referrals', r.id);
+      const referralsIn = await db.get('referrals', { referred_school_id: school.id });
+      for (const r of referralsIn) await db.delete('referrals', r.id);
+
+      const ledger = await db.get('referral_credit_ledger', { school_id: school.id });
+      for (const l of ledger) await db.delete('referral_credit_ledger', l.id);
+
+      const terms = await db.get('terms', { school_id: school.id });
+      for (const t of terms) await db.delete('terms', t.id);
+
+      // classes/users/sessions/students are SET NULL on school_id, but we
+      // delete classes and users explicitly too rather than leave them
+      // orphaned with school_id = null.
+      const classes = await db.get('classes', { school_id: school.id });
+      for (const c of classes) await db.delete('classes', c.id);
+
+      const users = await db.get('users', { school_id: school.id });
+      for (const u of users) await db.delete('users', u.id);
+
+      const sessions = await db.get('sessions', { school_id: school.id });
+      for (const s of sessions) await db.delete('sessions', s.id);
+
+      // CASCADE tables (daily_attendance, notifications, push_subscriptions,
+      // timetable) are handled automatically by Postgres once schools row
+      // is deleted, no need to delete them manually.
+
+      await db.delete('schools', school.id);
+      setDeleteConfirm(null);
+      await load();
+    } catch (e) {
+      setActionErr('Delete failed partway through — some data may need manual cleanup. Check console.');
+      console.error('School delete error:', e);
+    }
+    setBusyId(null);
+  };
 
   if (loading) {
     return <div style={{ textAlign: 'center', padding: 80 }}>
@@ -100,11 +174,15 @@ function SchoolsList() {
         {filtered.length} school{filtered.length !== 1 ? 's' : ''}
       </div>
 
+      {actionErr && <div style={{ background: '#fef2f2', color: '#dc2626', padding: 12, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>{actionErr}</div>}
+
       {filtered.map(school => {
         const status = statusFor(school);
+        const isExpanded = expandedId === school.id;
+        const isBusy = busyId === school.id;
         return (
           <div key={school.id} style={{ background: '#fff', borderRadius: 14, padding: 14, marginBottom: 10, border: '1px solid #f1f5f9', boxShadow: '0 1px 4px #0000000a' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+            <div onClick={() => setExpandedId(isExpanded ? null : school.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {school.name || 'Unnamed school'}
@@ -125,6 +203,19 @@ function SchoolsList() {
               {school.plan_expires_at &&
                 <div>Exp: {new Date(school.plan_expires_at).toLocaleDateString('en-NG')}</div>}
             </div>
+
+            {isExpanded && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', gap: 8 }}>
+                <button onClick={() => toggleDeactivate(school)} disabled={isBusy}
+                  style={{ flex: 1, background: school.deactivated ? '#f0fdf4' : '#fffbeb', color: school.deactivated ? '#16a34a' : '#d97706', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
+                  {isBusy ? '…' : school.deactivated ? 'Reactivate' : 'Deactivate'}
+                </button>
+                <button onClick={() => setDeleteConfirm({ school, typed: '' })} disabled={isBusy}
+                  style={{ flex: 1, background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
+                  Delete Permanently
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
@@ -133,6 +224,39 @@ function SchoolsList() {
         <div style={{ textAlign: 'center', padding: 60, color: '#94a3b8', fontSize: 13 }}>
           No schools match "{search}"
         </div>}
+
+      {/* ── Delete confirmation modal ── */}
+      {deleteConfirm && (
+        <div style={{ position: 'fixed', inset: 0, background: '#00000080', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 20, maxWidth: 360, width: '100%' }}>
+            <div style={{ fontWeight: 900, fontSize: 16, color: '#dc2626', marginBottom: 8 }}>⚠️ Permanent Delete</div>
+            <div style={{ fontSize: 13, color: '#374151', marginBottom: 14, lineHeight: 1.5 }}>
+              This will permanently erase <b>{deleteConfirm.school.name}</b> — all students, results, teachers, terms and referral history. This cannot be undone.
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>
+              Type <b>{deleteConfirm.school.name}</b> to confirm:
+            </div>
+            <input
+              value={deleteConfirm.typed}
+              onChange={e => setDeleteConfirm({ ...deleteConfirm, typed: e.target.value })}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #fecaca', fontSize: 13, marginBottom: 14, boxSizing: 'border-box' }}
+            />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setDeleteConfirm(null)}
+                style={{ flex: 1, background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 10, padding: '12px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteSchoolPermanently(deleteConfirm.school)}
+                disabled={deleteConfirm.typed !== deleteConfirm.school.name || busyId === deleteConfirm.school.id}
+                style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontWeight: 800, fontSize: 13, cursor: 'pointer',
+                  opacity: (deleteConfirm.typed !== deleteConfirm.school.name || busyId === deleteConfirm.school.id) ? 0.4 : 1 }}>
+                {busyId === deleteConfirm.school.id ? 'Deleting…' : 'Delete Forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -165,6 +289,13 @@ function PromoCodes() {
   const resetForm = () => {
     setForm({ code: '', discount: '', billing_cycle: 'termly', max_uses: 1, valid_until: '' });
     setErr('');
+  };
+
+  const generateRandomCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O/0/I/1 — avoids visual ambiguity
+    let suffix = '';
+    for (let i = 0; i < 6; i++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    setForm({ ...form, code: `PROMO-${suffix}` });
   };
 
   const createCode = async () => {
@@ -227,9 +358,15 @@ function PromoCodes() {
           <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b', marginBottom: 12 }}>New Promo Code</div>
 
           <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Code</label>
-          <input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })}
-            placeholder="e.g. END-OF-TERM"
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }} />
+          <div style={{ display: 'flex', gap: 8, margin: '6px 0 12px' }}>
+            <input value={form.code} onChange={e => setForm({ ...form, code: e.target.value.toUpperCase() })}
+              placeholder="e.g. END-OF-TERM"
+              style={{ flex: 1, padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box' }} />
+            <button onClick={generateRandomCode} type="button"
+              style={{ background: '#fef2f2', color: '#dc2626', border: '1.5px solid #fecaca', borderRadius: 10, padding: '0 14px', fontWeight: 700, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              🎲 Generate
+            </button>
+          </div>
 
           <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Billing cycle</label>
           <select value={form.billing_cycle} onChange={e => setForm({ ...form, billing_cycle: e.target.value })}
@@ -312,6 +449,284 @@ function PromoCodes() {
   );
 }
 
+// ── Announcements (Super Admin builder) ─────────────────────────────
+function Announcements() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  const blankForm = {
+    message: '', severity: 'info', audience: 'all',
+    link_label: '', link_target: '',
+    starts_at: '', ends_at: '',
+  };
+  const [form, setForm] = useState(blankForm);
+
+  useEffect(() => { load(); }, []);
+  const load = async () => {
+    setLoading(true);
+    const data = await db.get('announcements');
+    data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    setItems(data);
+    setLoading(false);
+  };
+
+  const resetForm = () => { setForm(blankForm); setErr(''); };
+
+  const createAnnouncement = async () => {
+    if (!form.message.trim()) { setErr('Enter a message'); return; }
+    if (!form.starts_at || !form.ends_at) { setErr('Pick start and end dates'); return; }
+    if (new Date(form.ends_at) <= new Date(form.starts_at)) { setErr('End date must be after start date'); return; }
+    // Only one of link_label/link_target filled is an incomplete link — catch it
+    // before saving rather than silently producing a banner with a dead button.
+    if ((form.link_label && !form.link_target) || (!form.link_label && form.link_target)) {
+      setErr('Fill both link label and link target, or leave both blank'); return;
+    }
+
+    setSaving(true);
+    setErr('');
+    const result = await db.post('announcements', {
+      message: form.message.trim(),
+      severity: form.severity,
+      audience: form.audience,
+      link_label: form.link_label.trim() || null,
+      link_target: form.link_target.trim() || null,
+      starts_at: new Date(form.starts_at).toISOString(),
+      ends_at: new Date(form.ends_at + 'T23:59:59').toISOString(),
+      active: true,
+    });
+    setSaving(false);
+
+    if (!result) { setErr('Could not create announcement.'); return; }
+    resetForm();
+    setShowForm(false);
+    load();
+  };
+
+  const toggleActive = async (item) => {
+    await db.patch('announcements', item.id, { active: !item.active });
+    load();
+  };
+
+  const deleteAnnouncement = async (item) => {
+    await db.delete('announcements', item.id);
+    load();
+  };
+
+  const SEVERITY_STYLE = {
+    info:    { label: 'Info',    color: '#0ea5e9', bg: '#f0f9ff' },
+    warning: { label: 'Warning', color: '#d97706', bg: '#fffbeb' },
+    urgent:  { label: 'Urgent',  color: '#dc2626', bg: '#fef2f2' },
+  };
+  const AUDIENCE_LABEL = { all: 'Everyone', principal: 'Principals only', teacher: 'Teachers only' };
+
+  const now = new Date();
+  const statusFor = (item) => {
+    if (!item.active) return { label: 'Disabled', color: '#78716c', bg: '#f5f5f4' };
+    if (new Date(item.ends_at) < now) return { label: 'Ended', color: '#78716c', bg: '#f5f5f4' };
+    if (new Date(item.starts_at) > now) return { label: 'Scheduled', color: '#7c3aed', bg: '#f5f3ff' };
+    return { label: 'Showing now', color: '#16a34a', bg: '#f0fdf4' };
+  };
+
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>⏳</div>
+      <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 14 }}>Loading announcements…</div>
+    </div>;
+  }
+
+  return (
+    <div>
+      {!showForm && (
+        <button onClick={() => setShowForm(true)}
+          style={{ width: '100%', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontWeight: 800, fontSize: 14, cursor: 'pointer', marginBottom: 16 }}>
+          + New Announcement
+        </button>
+      )}
+
+      {showForm && (
+        <div style={{ background: '#fff', border: '1.5px solid #fecaca', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: '#1e293b', marginBottom: 12 }}>New Announcement</div>
+
+          <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Message</label>
+          <textarea value={form.message} onChange={e => setForm({ ...form, message: e.target.value })}
+            placeholder="e.g. Termly promo ends Friday — renew now to lock in ₦25,000"
+            rows={3}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical' }} />
+
+          <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Severity</label>
+          <select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }}>
+            <option value="info">Info (blue)</option>
+            <option value="warning">Warning (amber)</option>
+            <option value="urgent">Urgent (red)</option>
+          </select>
+
+          <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Audience</label>
+          <select value={form.audience} onChange={e => setForm({ ...form, audience: e.target.value })}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }}>
+            <option value="all">Everyone</option>
+            <option value="principal">Principals only</option>
+            <option value="teacher">Teachers only</option>
+          </select>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Link label (optional)</label>
+              <input value={form.link_label} onChange={e => setForm({ ...form, link_label: e.target.value })}
+                placeholder="Renew now"
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Goes to tab</label>
+              <select value={form.link_target} onChange={e => setForm({ ...form, link_target: e.target.value })}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }}>
+                <option value="">— none —</option>
+                <option value="billing">Billing</option>
+                <option value="settings">Settings</option>
+                <option value="overview">Overview</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Starts</label>
+              <input type="date" value={form.starts_at} onChange={e => setForm({ ...form, starts_at: e.target.value })}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Ends</label>
+              <input type="date" value={form.ends_at} onChange={e => setForm({ ...form, ends_at: e.target.value })}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, margin: '6px 0 12px', boxSizing: 'border-box' }} />
+            </div>
+          </div>
+
+          {err && <div style={{ color: '#dc2626', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>{err}</div>}
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => { setShowForm(false); resetForm(); }} disabled={saving}
+              style={{ flex: 1, background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 10, padding: '12px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button onClick={createAnnouncement} disabled={saving}
+              style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, padding: '12px', fontWeight: 800, fontSize: 13, cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
+              {saving ? 'Creating…' : 'Create'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, marginBottom: 10 }}>
+        {items.length} announcement{items.length !== 1 ? 's' : ''}
+      </div>
+
+      {items.map(item => {
+        const sev = SEVERITY_STYLE[item.severity] || SEVERITY_STYLE.info;
+        const status = statusFor(item);
+        return (
+          <div key={item.id} style={{ background: '#fff', borderRadius: 14, padding: 14, marginBottom: 10, border: '1px solid #f1f5f9', boxShadow: '0 1px 4px #0000000a' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, flex: 1 }}>{item.message}</div>
+              <div style={{ background: status.bg, color: status.color, fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 20, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                {status.label}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 8, fontSize: 11, color: '#94a3b8', flexWrap: 'wrap' }}>
+              <span style={{ color: sev.color, fontWeight: 700 }}>{sev.label}</span>
+              <span>{AUDIENCE_LABEL[item.audience]}</span>
+              <span>{new Date(item.starts_at).toLocaleDateString('en-NG')} → {new Date(item.ends_at).toLocaleDateString('en-NG')}</span>
+              {item.link_label && <span>🔗 {item.link_label}</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button onClick={() => toggleActive(item)}
+                style={{ flex: 1, background: 'none', border: '1.5px solid #e2e8f0', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, color: '#64748b', cursor: 'pointer' }}>
+                {item.active ? 'Disable' : 'Enable'}
+              </button>
+              <button onClick={() => deleteAnnouncement(item)}
+                style={{ flex: 1, background: 'none', border: '1.5px solid #fecaca', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 700, color: '#dc2626', cursor: 'pointer' }}>
+                Delete
+              </button>
+            </div>
+          </div>
+        );
+      })}
+
+      {items.length === 0 && !showForm &&
+        <div style={{ textAlign: 'center', padding: 60, color: '#94a3b8', fontSize: 13 }}>
+          No announcements yet
+        </div>}
+    </div>
+  );
+}
+
+// ── Announcement banner display (used on Principal/Teacher dashboards) ──
+// Exported separately so App.js can render it inside SidebarLayout
+// without SuperAdminDash itself needing to be involved.
+export function AnnouncementBanners({ role, onNavigate }) {
+  const [items, setItems] = useState([]);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('dismissed_announcements') || '[]'); }
+    catch { return []; }
+  });
+
+  useEffect(() => {
+    db.get('announcements').then(data => {
+      const now = new Date();
+      const visible = data.filter(a =>
+        a.active &&
+        new Date(a.starts_at) <= now &&
+        new Date(a.ends_at) >= now &&
+        (a.audience === 'all' || a.audience === role)
+      );
+      setItems(visible);
+    });
+  }, [role]);
+
+  const dismiss = (id) => {
+    const next = [...dismissed, id];
+    setDismissed(next);
+    try { sessionStorage.setItem('dismissed_announcements', JSON.stringify(next)); } catch {}
+  };
+
+  const SEVERITY_STYLE = {
+    info:    { bg: '#eff6ff', border: '#bfdbfe', text: '#1e40af' },
+    warning: { bg: '#fffbeb', border: '#fde68a', text: '#92400e' },
+    urgent:  { bg: '#fef2f2', border: '#fecaca', text: '#991b1b' },
+  };
+
+  const visible = items.filter(i => !dismissed.includes(i.id));
+  if (!visible.length) return null;
+
+  return (
+    <div style={{ padding: '10px 16px 0' }}>
+      {visible.map(item => {
+        const sev = SEVERITY_STYLE[item.severity] || SEVERITY_STYLE.info;
+        return (
+          <div key={item.id} style={{
+            background: sev.bg, border: `1.5px solid ${sev.border}`, borderRadius: 12,
+            padding: '10px 12px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10
+          }}>
+            <div style={{ flex: 1, fontSize: 13, color: sev.text, fontWeight: 600 }}>{item.message}</div>
+            {item.link_label && item.link_target && onNavigate && (
+              <button onClick={() => onNavigate(item.link_target)}
+                style={{ background: sev.text, color: '#fff', border: 'none', borderRadius: 8, padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                {item.link_label}
+              </button>
+            )}
+            <button onClick={() => dismiss(item.id)}
+              style={{ background: 'none', border: 'none', color: sev.text, fontSize: 16, fontWeight: 700, cursor: 'pointer', padding: '0 4px', opacity: 0.6 }}>
+              ×
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main export ───────────────────────────────────────────────────
 export default function SuperAdminDash({ user, onLogout }) {
   const [tab, setTab] = useState('schools');
@@ -320,6 +735,7 @@ export default function SuperAdminDash({ user, onLogout }) {
     <SuperAdminLayout user={user} onLogout={onLogout} tab={tab} setTab={setTab}>
       {tab === 'schools' && <SchoolsList />}
       {tab === 'promos' && <PromoCodes />}
+      {tab === 'announcements' && <Announcements />}
     </SuperAdminLayout>
   );
 }
