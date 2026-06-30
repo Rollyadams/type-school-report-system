@@ -29,6 +29,7 @@ function SuperAdminLayout({ user, onLogout, tab, setTab, children }) {
     { id: 'schools', label: 'Schools', icon: '🏫' },
     { id: 'revenue', label: 'Revenue', icon: '💰' },
     { id: 'activity', label: 'Activity', icon: '📜' },
+    { id: 'health', label: 'Health', icon: '🩺' },
     { id: 'promos',  label: 'Promo Codes', icon: '🏷️' },
     { id: 'announcements', label: 'Announcements', icon: '📢' },
   ];
@@ -49,12 +50,12 @@ function SuperAdminLayout({ user, onLogout, tab, setTab, children }) {
       </div>
 
       {/* ── Tab Strip ── */}
-      <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #f1f5f9', position: 'sticky', top: 62, zIndex: 90 }}>
+      <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #f1f5f9', position: 'sticky', top: 62, zIndex: 90, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
         {tabs.map(t => {
           const isActive = tab === t.id;
           return (
             <button key={t.id} onClick={() => setTab(t.id)}
-              style={{ flex: 1, padding: '12px 8px', border: 'none', background: 'none', cursor: 'pointer',
+              style={{ flex: '0 0 auto', minWidth: 86, padding: '12px 10px', border: 'none', background: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
                 borderBottom: isActive ? `3px solid ${accent}` : '3px solid transparent',
                 color: isActive ? accent : '#64748b', fontWeight: isActive ? 800 : 600, fontSize: 13 }}>
               {t.icon} {t.label}
@@ -80,6 +81,8 @@ function SchoolsList({ user }) {
   const [busyId, setBusyId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { school, typed }
   const [actionErr, setActionErr] = useState('');
+  const [overrideId, setOverrideId] = useState(null);
+  const [overrideForm, setOverrideForm] = useState({ plan: 'pro', expiresAt: '', reason: '' });
 
   useEffect(() => { load(); }, []);
   const load = async () => {
@@ -181,6 +184,37 @@ function SchoolsList({ user }) {
     setBusyId(null);
   };
 
+  const openOverride = (school) => {
+    const defaultExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    setOverrideForm({
+      plan: 'pro', // override defaults to granting Pro — the common case
+      expiresAt: school.plan_expires_at ? new Date(school.plan_expires_at).toISOString().slice(0, 10) : defaultExpiry,
+      reason: '',
+    });
+    setOverrideId(school.id);
+  };
+
+  // Manual override bypasses Paystack entirely — does NOT write to `payments`,
+  // since this isn't a real transaction and would corrupt revenue numbers.
+  // It IS logged to audit_logs so there's always a record of why a school's
+  // plan changed without a matching payment.
+  const applyOverride = async (school) => {
+    setBusyId(school.id);
+    setActionErr('');
+    const patch = {
+      plan: overrideForm.plan,
+      plan_expires_at: overrideForm.plan === 'pro' ? new Date(overrideForm.expiresAt + 'T23:59:59').toISOString() : null,
+    };
+    await db.patch('schools', school.id, patch);
+    await logAudit(user, 'school.plan_override', 'school', school.id, school.name, {
+      from_plan: school.plan, to_plan: overrideForm.plan,
+      plan_expires_at: patch.plan_expires_at, reason: overrideForm.reason.trim() || null,
+    });
+    setOverrideId(null);
+    await load();
+    setBusyId(null);
+  };
+
   if (loading) {
     return <div style={{ textAlign: 'center', padding: 80 }}>
       <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>⏳</div>
@@ -232,15 +266,53 @@ function SchoolsList({ user }) {
             </div>
 
             {isExpanded && (
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', gap: 8 }}>
-                <button onClick={() => toggleDeactivate(school)} disabled={isBusy}
-                  style={{ flex: 1, background: school.deactivated ? '#f0fdf4' : '#fffbeb', color: school.deactivated ? '#16a34a' : '#d97706', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
-                  {isBusy ? '…' : school.deactivated ? 'Reactivate' : 'Deactivate'}
-                </button>
-                <button onClick={() => setDeleteConfirm({ school, typed: '' })} disabled={isBusy}
-                  style={{ flex: 1, background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
-                  Delete Permanently
-                </button>
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => toggleDeactivate(school)} disabled={isBusy}
+                    style={{ flex: 1, background: school.deactivated ? '#f0fdf4' : '#fffbeb', color: school.deactivated ? '#16a34a' : '#d97706', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
+                    {isBusy ? '…' : school.deactivated ? 'Reactivate' : 'Deactivate'}
+                  </button>
+                  <button onClick={() => openOverride(school)} disabled={isBusy}
+                    style={{ flex: 1, background: '#f5f3ff', color: '#7c3aed', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
+                    Override Plan
+                  </button>
+                  <button onClick={() => setDeleteConfirm({ school, typed: '' })} disabled={isBusy}
+                    style={{ flex: 1, background: '#fef2f2', color: '#dc2626', border: 'none', borderRadius: 10, padding: '10px', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
+                    Delete
+                  </button>
+                </div>
+
+                {overrideId === school.id && (
+                  <div style={{ marginTop: 10, background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 10, padding: 12 }}>
+                    <div style={{ fontSize: 11, color: '#7c3aed', fontWeight: 800, marginBottom: 8 }}>
+                      MANUAL OVERRIDE — bypasses Paystack, no payment recorded
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <select value={overrideForm.plan} onChange={e => setOverrideForm({ ...overrideForm, plan: e.target.value })}
+                        style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 12 }}>
+                        <option value="pro">Pro</option>
+                        <option value="free">Free</option>
+                      </select>
+                      {overrideForm.plan === 'pro' && (
+                        <input type="date" value={overrideForm.expiresAt}
+                          onChange={e => setOverrideForm({ ...overrideForm, expiresAt: e.target.value })}
+                          style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 12, boxSizing: 'border-box' }} />
+                      )}
+                    </div>
+                    <input value={overrideForm.reason} onChange={e => setOverrideForm({ ...overrideForm, reason: e.target.value })}
+                      placeholder="Reason (e.g. manual bank transfer, goodwill extension)"
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 12, marginBottom: 8, boxSizing: 'border-box' }} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => setOverrideId(null)} style={{ flex: 1, background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: 8, padding: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+                        Cancel
+                      </button>
+                      <button onClick={() => applyOverride(school)} disabled={isBusy}
+                        style={{ flex: 1, background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, padding: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isBusy ? 0.6 : 1 }}>
+                        {isBusy ? '…' : 'Apply'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -284,6 +356,129 @@ function SchoolsList({ user }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── System Health ─────────────────────────────────────────────────
+// NOTE: True edge function error logs / uptime require Supabase's
+// Management API (service-role token) — not safe to call from a
+// client-side app. What's below is everything genuinely checkable
+// from data already in the tables, which covers the real failure mode
+// that bit you before (validate-promo-code silently dying for weeks).
+function SystemHealth() {
+  const [schools, setSchools] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [logins, setLogins] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { load(); }, []);
+  const load = async () => {
+    setLoading(true);
+    const [s, p, l] = await Promise.all([
+      db.get('schools'),
+      db.get('payments'),
+      supabase.from('login_attempts').select('*').order('attempted_at', { ascending: false }).limit(300).then(r => r.data || []),
+    ]);
+    setSchools(s);
+    setPayments(p.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+    setLogins(l);
+    setLoading(false);
+  };
+
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>⏳</div>
+      <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 14 }}>Checking system health…</div>
+    </div>;
+  }
+
+  const now = new Date();
+  const cardStyle = { background: '#fff', borderRadius: 14, padding: 14, border: '1px solid #f1f5f9', boxShadow: '0 1px 4px #0000000a', marginBottom: 12 };
+
+  // 1. Payment pipeline silence — the exact failure mode that caused the
+  // validate-promo-code outage: nothing breaks loudly, payments just stop.
+  const lastPayment = payments[0];
+  const daysSincePayment = lastPayment ? Math.floor((now - new Date(lastPayment.created_at)) / 86400000) : null;
+  const pipelineStatus = daysSincePayment === null ? { label: 'No payments yet', color: '#94a3b8', bg: '#f8fafc' }
+    : daysSincePayment <= 7 ? { label: `Last payment ${daysSincePayment}d ago`, color: '#16a34a', bg: '#f0fdf4' }
+    : daysSincePayment <= 14 ? { label: `${daysSincePayment}d since last payment`, color: '#d97706', bg: '#fffbeb' }
+    : { label: `⚠️ ${daysSincePayment}d since last payment`, color: '#dc2626', bg: '#fef2f2' };
+
+  // 2. Pro schools whose plan_expires_at has passed but the row is still
+  // marked plan='pro' — the app gates correctly off the date anyway, but
+  // these are real schools needing a renewal call.
+  const expiredPro = schools.filter(s => s.plan === 'pro' && !s.deactivated && s.plan_expires_at && new Date(s.plan_expires_at) <= now);
+
+  // 3. Pro schools expiring within 7 days — proactive renewal outreach list.
+  const expiringSoon = schools.filter(s => {
+    if (s.plan !== 'pro' || s.deactivated || !s.plan_expires_at) return false;
+    const exp = new Date(s.plan_expires_at);
+    const daysLeft = (exp - now) / 86400000;
+    return daysLeft > 0 && daysLeft <= 7;
+  });
+
+  // 4. Login security — currently rate-limited emails (5+ fails in last 15 min,
+  // same window as the app's own rate limiter) and total fails in 24h.
+  const fifteenMinAgo = new Date(now - 15 * 60000);
+  const dayAgo = new Date(now - 24 * 3600000);
+  const failsByEmail = {};
+  logins.forEach(a => {
+    if (!a.success && new Date(a.attempted_at) >= fifteenMinAgo) {
+      failsByEmail[a.email] = (failsByEmail[a.email] || 0) + 1;
+    }
+  });
+  const lockedOut = Object.entries(failsByEmail).filter(([, count]) => count >= 5);
+  const fails24h = logins.filter(a => !a.success && new Date(a.attempted_at) >= dayAgo).length;
+
+  return (
+    <div>
+      <div style={cardStyle}>
+        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>PAYMENT PIPELINE</div>
+        <div style={{ background: pipelineStatus.bg, color: pipelineStatus.color, display: 'inline-block', padding: '6px 12px', borderRadius: 20, fontWeight: 800, fontSize: 13 }}>
+          {pipelineStatus.label}
+        </div>
+        {daysSincePayment > 14 && <div style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>
+          More than 2 weeks since the last successful payment. If schools are actively trying to pay, check the Paystack webhook logs in the Supabase dashboard.
+        </div>}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>LOGIN SECURITY (last 24h)</div>
+        <div style={{ display: 'flex', gap: 16, marginBottom: lockedOut.length ? 10 : 0 }}>
+          <div><div style={{ fontSize: 20, fontWeight: 900, color: fails24h > 20 ? '#dc2626' : '#1e293b' }}>{fails24h}</div><div style={{ fontSize: 11, color: '#94a3b8' }}>failed logins</div></div>
+          <div><div style={{ fontSize: 20, fontWeight: 900, color: lockedOut.length ? '#dc2626' : '#16a34a' }}>{lockedOut.length}</div><div style={{ fontSize: 11, color: '#94a3b8' }}>locked out now</div></div>
+        </div>
+        {lockedOut.map(([email, count]) => (
+          <div key={email} style={{ fontSize: 12, color: '#dc2626', padding: '4px 0' }}>🔒 {email} — {count} fails in last 15 min</div>
+        ))}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>EXPIRED PRO — NOT RENEWED ({expiredPro.length})</div>
+        {expiredPro.length === 0 && <div style={{ fontSize: 12, color: '#94a3b8' }}>None — all caught up</div>}
+        {expiredPro.map(s => (
+          <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderTop: '1px solid #f8fafc' }}>
+            <span style={{ color: '#1e293b', fontWeight: 600 }}>{s.name}</span>
+            <span style={{ color: '#dc2626' }}>expired {new Date(s.plan_expires_at).toLocaleDateString('en-NG')}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, marginBottom: 8 }}>EXPIRING WITHIN 7 DAYS ({expiringSoon.length})</div>
+        {expiringSoon.length === 0 && <div style={{ fontSize: 12, color: '#94a3b8' }}>None coming up</div>}
+        {expiringSoon.map(s => (
+          <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderTop: '1px solid #f8fafc' }}>
+            <span style={{ color: '#1e293b', fontWeight: 600 }}>{s.name}</span>
+            <span style={{ color: '#d97706' }}>{new Date(s.plan_expires_at).toLocaleDateString('en-NG')}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '4px 12px' }}>
+        Edge function errors and uptime aren't visible here — check Supabase Dashboard → Edge Functions → Logs for those.
+      </div>
     </div>
   );
 }
@@ -453,6 +648,7 @@ const ACTION_META = {
   'school.deactivate':    { icon: '⏸️', color: '#d97706', label: (l) => `${l.actor_name} deactivated ${l.target_label || 'a school'}` },
   'school.reactivate':    { icon: '▶️', color: '#16a34a', label: (l) => `${l.actor_name} reactivated ${l.target_label || 'a school'}` },
   'school.delete':        { icon: '🗑️', color: '#dc2626', label: (l) => `${l.actor_name} permanently deleted ${l.target_label || 'a school'}` },
+  'school.plan_override': { icon: '🔧', color: '#7c3aed', label: (l) => `${l.actor_name} manually set ${l.target_label || 'a school'} to ${l.details?.to_plan} plan${l.details?.plan_expires_at ? ` (exp ${new Date(l.details.plan_expires_at).toLocaleDateString('en-NG')})` : ''}${l.details?.reason ? ` — ${l.details.reason}` : ''}` },
   'promo.create':         { icon: '🏷️', color: '#3b82f6', label: (l) => `${l.actor_name} created promo code ${l.target_label}` },
   'promo.enable':         { icon: '🏷️', color: '#16a34a', label: (l) => `${l.actor_name} enabled promo code ${l.target_label}` },
   'promo.disable':        { icon: '🏷️', color: '#d97706', label: (l) => `${l.actor_name} disabled promo code ${l.target_label}` },
@@ -1057,6 +1253,7 @@ export default function SuperAdminDash({ user, onLogout }) {
       {tab === 'schools' && <SchoolsList user={user} />}
       {tab === 'revenue' && <Revenue />}
       {tab === 'activity' && <ActivityLog />}
+      {tab === 'health' && <SystemHealth />}
       {tab === 'promos' && <PromoCodes user={user} />}
       {tab === 'announcements' && <Announcements user={user} />}
     </SuperAdminLayout>
