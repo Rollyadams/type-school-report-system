@@ -8,6 +8,7 @@ import { db } from './supabaseClient';
 function SuperAdminLayout({ user, onLogout, tab, setTab, children }) {
   const tabs = [
     { id: 'schools', label: 'Schools', icon: '🏫' },
+    { id: 'revenue', label: 'Revenue', icon: '💰' },
     { id: 'promos',  label: 'Promo Codes', icon: '🏷️' },
     { id: 'announcements', label: 'Announcements', icon: '📢' },
   ];
@@ -257,6 +258,160 @@ function SchoolsList() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Revenue ───────────────────────────────────────────────────────
+const naira = (n) => `₦${Number(n || 0).toLocaleString()}`;
+
+function Revenue() {
+  const [payments, setPayments] = useState([]);
+  const [schools, setSchools] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { load(); }, []);
+  const load = async () => {
+    setLoading(true);
+    const [p, s] = await Promise.all([db.get('payments'), db.get('schools')]);
+    p.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    setPayments(p);
+    setSchools(s);
+    setLoading(false);
+  };
+
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>⏳</div>
+      <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 14 }}>Loading revenue…</div>
+    </div>;
+  }
+
+  const schoolMap = Object.fromEntries(schools.map(s => [s.id, s]));
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  const sumWhere = (fn) => payments.filter(fn).reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+
+  const totalRevenue = sumWhere(() => true);
+  const thisMonthRevenue = sumWhere(p => new Date(p.created_at) >= monthStart);
+  const lastMonthRevenue = sumWhere(p => { const d = new Date(p.created_at); return d >= lastMonthStart && d < monthStart; });
+  const momChange = lastMonthRevenue > 0
+    ? Math.round(((thisMonthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100)
+    : (thisMonthRevenue > 0 ? 100 : 0);
+
+  const activeProCount = schools.filter(s => s.plan === 'pro' && !s.deactivated && s.plan_expires_at && new Date(s.plan_expires_at) > now).length;
+  const freeCount = schools.length - activeProCount;
+
+  const cycleBreakdown = payments.reduce((acc, p) => {
+    const c = p.billing_cycle || 'unknown';
+    acc[c] = (acc[c] || 0) + Number(p.amount_paid || 0);
+    return acc;
+  }, {});
+  const cycleTotal = Object.values(cycleBreakdown).reduce((a, b) => a + b, 0) || 1;
+  const CYCLE_COLOR = { monthly: '#3b82f6', termly: '#f59e0b', yearly: '#16a34a', unknown: '#94a3b8' };
+
+  // last 6 calendar months
+  const months = [];
+  for (let i = 5; i >= 0; i--) months.push(new Date(now.getFullYear(), now.getMonth() - i, 1));
+  const trend = months.map(m => {
+    const mEnd = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+    const total = sumWhere(p => { const d = new Date(p.created_at); return d >= m && d < mEnd; });
+    return { label: m.toLocaleDateString('en-NG', { month: 'short' }), total };
+  });
+  const maxTrend = Math.max(...trend.map(t => t.total), 1);
+
+  const cardStyle = { background: '#fff', borderRadius: 14, padding: 14, border: '1px solid #f1f5f9', boxShadow: '0 1px 4px #0000000a' };
+
+  return (
+    <div>
+      {/* ── Top stat cards ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div style={cardStyle}>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>ALL-TIME REVENUE</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#1e293b', marginTop: 4 }}>{naira(totalRevenue)}</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>THIS MONTH</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#1e293b', marginTop: 4 }}>{naira(thisMonthRevenue)}</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: momChange >= 0 ? '#16a34a' : '#dc2626', marginTop: 2 }}>
+            {momChange >= 0 ? '▲' : '▼'} {Math.abs(momChange)}% vs last month
+          </div>
+        </div>
+        <div style={cardStyle}>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>ACTIVE PRO SCHOOLS</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#16a34a', marginTop: 4 }}>{activeProCount}</div>
+        </div>
+        <div style={cardStyle}>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>FREE / TRIAL</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: '#64748b', marginTop: 4 }}>{freeCount}</div>
+        </div>
+      </div>
+
+      {/* ── 6-month trend ── */}
+      <div style={{ ...cardStyle, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginBottom: 12 }}>Last 6 months</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 90 }}>
+          {trend.map((t, i) => (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <div style={{
+                width: '100%', maxWidth: 28,
+                height: Math.max(4, (t.total / maxTrend) * 70),
+                background: i === trend.length - 1 ? '#dc2626' : '#fecaca',
+                borderRadius: 4,
+              }} title={naira(t.total)} />
+              <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700 }}>{t.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Revenue by billing cycle ── */}
+      <div style={{ ...cardStyle, marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#1e293b', marginBottom: 10 }}>Revenue by plan</div>
+        {Object.entries(cycleBreakdown).sort((a, b) => b[1] - a[1]).map(([cycle, amt]) => (
+          <div key={cycle} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+              <span style={{ color: '#374151', fontWeight: 700, textTransform: 'capitalize' }}>{cycle}</span>
+              <span style={{ color: '#64748b', fontWeight: 700 }}>{naira(amt)}</span>
+            </div>
+            <div style={{ background: '#f1f5f9', borderRadius: 6, height: 6, overflow: 'hidden' }}>
+              <div style={{ width: `${(amt / cycleTotal) * 100}%`, height: '100%', background: CYCLE_COLOR[cycle] || '#94a3b8' }} />
+            </div>
+          </div>
+        ))}
+        {payments.length === 0 && <div style={{ fontSize: 12, color: '#94a3b8' }}>No payments yet</div>}
+      </div>
+
+      {/* ── Recent payments ── */}
+      <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, marginBottom: 10 }}>
+        Recent payments ({payments.length})
+      </div>
+      {payments.slice(0, 15).map(p => {
+        const school = schoolMap[p.school_id];
+        return (
+          <div key={p.id} style={{ ...cardStyle, marginBottom: 8, padding: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {school?.name || 'Unknown school'}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                  {p.billing_cycle} · {new Date(p.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {p.promo_code && ` · promo ${p.promo_code}`}
+                  {p.credit_used > 0 && ` · ${naira(p.credit_used)} credit used`}
+                </div>
+              </div>
+              <div style={{ fontWeight: 900, fontSize: 14, color: '#16a34a', whiteSpace: 'nowrap' }}>{naira(p.amount_paid)}</div>
+            </div>
+          </div>
+        );
+      })}
+      {payments.length === 0 &&
+        <div style={{ textAlign: 'center', padding: 60, color: '#94a3b8', fontSize: 13 }}>
+          No payments recorded yet
+        </div>}
     </div>
   );
 }
@@ -734,6 +889,7 @@ export default function SuperAdminDash({ user, onLogout }) {
   return (
     <SuperAdminLayout user={user} onLogout={onLogout} tab={tab} setTab={setTab}>
       {tab === 'schools' && <SchoolsList />}
+      {tab === 'revenue' && <Revenue />}
       {tab === 'promos' && <PromoCodes />}
       {tab === 'announcements' && <Announcements />}
     </SuperAdminLayout>
