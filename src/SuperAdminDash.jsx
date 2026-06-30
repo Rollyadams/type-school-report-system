@@ -1,5 +1,24 @@
 import { useState, useEffect } from 'react';
-import { db } from './supabaseClient';
+import { db, supabase } from './supabaseClient';
+
+// Fire-and-forget audit log write. Never blocks or fails the action it's
+// logging — a logging hiccup must never be mistaken for the real action
+// (deactivate/delete/etc.) having failed.
+async function logAudit(user, action, targetType, targetId, targetLabel, details = {}) {
+  try {
+    await db.post('audit_logs', {
+      actor_id: user?.id || null,
+      actor_name: user?.full_name || 'Unknown',
+      action,
+      target_type: targetType,
+      target_id: targetId || null,
+      target_label: targetLabel || null,
+      details,
+    });
+  } catch (e) {
+    console.error('Audit log write failed (action itself still succeeded):', e);
+  }
+}
 
 // ── Shared layout for the Super Admin dashboard ──────────────────
 // Deliberately standalone (does not reuse SidebarLayout) so that
@@ -9,6 +28,7 @@ function SuperAdminLayout({ user, onLogout, tab, setTab, children }) {
   const tabs = [
     { id: 'schools', label: 'Schools', icon: '🏫' },
     { id: 'revenue', label: 'Revenue', icon: '💰' },
+    { id: 'activity', label: 'Activity', icon: '📜' },
     { id: 'promos',  label: 'Promo Codes', icon: '🏷️' },
     { id: 'announcements', label: 'Announcements', icon: '📢' },
   ];
@@ -52,7 +72,7 @@ function SuperAdminLayout({ user, onLogout, tab, setTab, children }) {
 }
 
 // ── Schools List ──────────────────────────────────────────────────
-function SchoolsList() {
+function SchoolsList({ user }) {
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -90,7 +110,9 @@ function SchoolsList() {
   const toggleDeactivate = async (school) => {
     setBusyId(school.id);
     setActionErr('');
-    await db.patch('schools', school.id, { deactivated: !school.deactivated });
+    const willBeDeactivated = !school.deactivated;
+    await db.patch('schools', school.id, { deactivated: willBeDeactivated });
+    await logAudit(user, willBeDeactivated ? 'school.deactivate' : 'school.reactivate', 'school', school.id, school.name);
     await load();
     setBusyId(null);
   };
@@ -146,6 +168,10 @@ function SchoolsList() {
       // is deleted, no need to delete them manually.
 
       await db.delete('schools', school.id);
+      await logAudit(user, 'school.delete', 'school', school.id, school.name, {
+        students_deleted: studentIds.length,
+        email: school.email,
+      });
       setDeleteConfirm(null);
       await load();
     } catch (e) {
@@ -416,8 +442,137 @@ function Revenue() {
   );
 }
 
+// ── Activity Log ─────────────────────────────────────────────────
+// Merges three independent sources into one chronological feed:
+// audit_logs (admin actions), login_attempts (already written by App.js
+// on every login), and payments (promo redemptions / plan upgrades).
+// Each source is queried directly via supabase (ordered + limited) rather
+// than db.get, since these tables grow unbounded and db.get has no
+// order/limit support.
+const ACTION_META = {
+  'school.deactivate':    { icon: '⏸️', color: '#d97706', label: (l) => `${l.actor_name} deactivated ${l.target_label || 'a school'}` },
+  'school.reactivate':    { icon: '▶️', color: '#16a34a', label: (l) => `${l.actor_name} reactivated ${l.target_label || 'a school'}` },
+  'school.delete':        { icon: '🗑️', color: '#dc2626', label: (l) => `${l.actor_name} permanently deleted ${l.target_label || 'a school'}` },
+  'promo.create':         { icon: '🏷️', color: '#3b82f6', label: (l) => `${l.actor_name} created promo code ${l.target_label}` },
+  'promo.enable':         { icon: '🏷️', color: '#16a34a', label: (l) => `${l.actor_name} enabled promo code ${l.target_label}` },
+  'promo.disable':        { icon: '🏷️', color: '#d97706', label: (l) => `${l.actor_name} disabled promo code ${l.target_label}` },
+  'announcement.create':  { icon: '📢', color: '#3b82f6', label: (l) => `${l.actor_name} created an announcement` },
+  'announcement.enable':  { icon: '📢', color: '#16a34a', label: (l) => `${l.actor_name} enabled an announcement` },
+  'announcement.disable': { icon: '📢', color: '#d97706', label: (l) => `${l.actor_name} disabled an announcement` },
+  'announcement.delete':  { icon: '🗑️', color: '#dc2626', label: (l) => `${l.actor_name} deleted an announcement` },
+  'impersonate.start':    { icon: '🕵️', color: '#7c3aed', label: (l) => `${l.actor_name} viewed ${l.target_label || 'a school'} as ${l.details?.as_role || 'user'}` },
+  'impersonate.end':      { icon: '🕵️', color: '#94a3b8', label: (l) => `${l.actor_name} exited view-as for ${l.target_label || 'a school'}` },
+};
+
+function timeAgo(iso) {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' });
+}
+
+function ActivityLog() {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+
+  useEffect(() => { load(); }, []);
+  const load = async () => {
+    setLoading(true);
+    const [logsRes, loginsRes, paysRes, schoolsRes] = await Promise.all([
+      supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100),
+      supabase.from('login_attempts').select('*').order('attempted_at', { ascending: false }).limit(100),
+      supabase.from('payments').select('*').order('created_at', { ascending: false }).limit(50),
+      supabase.from('schools').select('id,name'),
+    ]);
+
+    const schoolMap = Object.fromEntries((schoolsRes.data || []).map(s => [s.id, s.name]));
+
+    const adminEvents = (logsRes.data || []).map(l => {
+      const meta = ACTION_META[l.action] || { icon: '⚙️', color: '#64748b', label: (x) => `${x.actor_name} performed ${x.action}` };
+      return { id: `audit-${l.id}`, type: 'admin', time: l.created_at, icon: meta.icon, color: meta.color, title: meta.label(l) };
+    });
+
+    const loginEvents = (loginsRes.data || []).map(a => ({
+      id: `login-${a.id}`, type: 'login', time: a.attempted_at,
+      icon: a.success ? '🔓' : '🚫', color: a.success ? '#16a34a' : '#dc2626',
+      title: `${a.success ? 'Login success' : 'Failed login attempt'} — ${a.email}`,
+    }));
+
+    const paymentEvents = (paysRes.data || []).map(p => ({
+      id: `pay-${p.id}`, type: 'payment', time: p.created_at, icon: '💳', color: '#16a34a',
+      title: `${schoolMap[p.school_id] || 'Unknown school'} paid ${naira(p.amount_paid)} (${p.billing_cycle})${p.promo_code ? ` · promo ${p.promo_code}` : ''}`,
+    }));
+
+    const all = [...adminEvents, ...loginEvents, ...paymentEvents]
+      .sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    setEvents(all);
+    setLoading(false);
+  };
+
+  if (loading) {
+    return <div style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>⏳</div>
+      <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 14 }}>Loading activity…</div>
+    </div>;
+  }
+
+  const FILTERS = [
+    { id: 'all',     label: 'All' },
+    { id: 'admin',   label: 'Admin' },
+    { id: 'login',   label: 'Logins' },
+    { id: 'payment', label: 'Payments' },
+  ];
+  const filtered = filter === 'all' ? events : events.filter(e => e.type === filter);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto' }}>
+        {FILTERS.map(f => (
+          <button key={f.id} onClick={() => setFilter(f.id)}
+            style={{
+              flexShrink: 0, padding: '6px 14px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              border: filter === f.id ? 'none' : '1.5px solid #e2e8f0',
+              background: filter === f.id ? '#dc2626' : '#fff',
+              color: filter === f.id ? '#fff' : '#64748b',
+            }}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ fontSize: 12, color: '#94a3b8', fontWeight: 700, marginBottom: 10 }}>
+        {filtered.length} event{filtered.length !== 1 ? 's' : ''} · last 100 per source
+      </div>
+
+      {filtered.map(e => (
+        <div key={e.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', background: '#fff', borderRadius: 12, padding: '10px 12px', marginBottom: 8, border: '1px solid #f1f5f9', boxShadow: '0 1px 4px #0000000a' }}>
+          <div style={{ width: 28, height: 28, borderRadius: '50%', background: `${e.color}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+            {e.icon}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, lineHeight: 1.4 }}>{e.title}</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{timeAgo(e.time)}</div>
+          </div>
+        </div>
+      ))}
+
+      {filtered.length === 0 &&
+        <div style={{ textAlign: 'center', padding: 60, color: '#94a3b8', fontSize: 13 }}>
+          No activity yet
+        </div>}
+    </div>
+  );
+}
+
 // ── Promo Codes ───────────────────────────────────────────────────
-function PromoCodes() {
+function PromoCodes({ user }) {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -480,13 +635,18 @@ function PromoCodes() {
       setErr('Could not create code — it may already exist.');
       return;
     }
+    await logAudit(user, 'promo.create', 'promo_code', result.id, code, {
+      discount, billing_cycle: form.billing_cycle, max_uses: maxUses,
+    });
     resetForm();
     setShowForm(false);
     load();
   };
 
   const toggleActive = async (promo) => {
-    await db.patch('promo_codes', promo.id, { active: !promo.active });
+    const willBeActive = !promo.active;
+    await db.patch('promo_codes', promo.id, { active: willBeActive });
+    await logAudit(user, willBeActive ? 'promo.enable' : 'promo.disable', 'promo_code', promo.id, promo.code);
     load();
   };
 
@@ -605,7 +765,7 @@ function PromoCodes() {
 }
 
 // ── Announcements (Super Admin builder) ─────────────────────────────
-function Announcements() {
+function Announcements({ user }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -655,18 +815,24 @@ function Announcements() {
     setSaving(false);
 
     if (!result) { setErr('Could not create announcement.'); return; }
+    await logAudit(user, 'announcement.create', 'announcement', result.id, form.message.trim().slice(0, 60), {
+      severity: form.severity, audience: form.audience,
+    });
     resetForm();
     setShowForm(false);
     load();
   };
 
   const toggleActive = async (item) => {
-    await db.patch('announcements', item.id, { active: !item.active });
+    const willBeActive = !item.active;
+    await db.patch('announcements', item.id, { active: willBeActive });
+    await logAudit(user, willBeActive ? 'announcement.enable' : 'announcement.disable', 'announcement', item.id, item.message?.slice(0, 60));
     load();
   };
 
   const deleteAnnouncement = async (item) => {
     await db.delete('announcements', item.id);
+    await logAudit(user, 'announcement.delete', 'announcement', item.id, item.message?.slice(0, 60));
     load();
   };
 
@@ -888,10 +1054,11 @@ export default function SuperAdminDash({ user, onLogout }) {
 
   return (
     <SuperAdminLayout user={user} onLogout={onLogout} tab={tab} setTab={setTab}>
-      {tab === 'schools' && <SchoolsList />}
+      {tab === 'schools' && <SchoolsList user={user} />}
       {tab === 'revenue' && <Revenue />}
-      {tab === 'promos' && <PromoCodes />}
-      {tab === 'announcements' && <Announcements />}
+      {tab === 'activity' && <ActivityLog />}
+      {tab === 'promos' && <PromoCodes user={user} />}
+      {tab === 'announcements' && <Announcements user={user} />}
     </SuperAdminLayout>
   );
 }
