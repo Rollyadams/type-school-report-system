@@ -1,198 +1,86 @@
-import { createClient } from '@supabase/supabase-js';
-import { offlineDB } from './offlineDB';
-import { enqueue, readCache } from './syncEngine';
-import * as Sentry from '@sentry/react';
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const supabaseUrl     = process.env.REACT_APP_SUPABASE_URL;
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+const SUPABASE_URL     = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-let _userId   = null;
-let _schoolId = null;
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE);
 
-// Custom fetch: stamps every single request with the current user id,
-// read fresh at call time. This removes the RPC-then-query race entirely —
-// identity arrives WITH the query, in the same request, every time.
-const fetchWithUserHeader = (url, options = {}) => {
-  const headers = new Headers(options.headers || {});
-  if (_userId) headers.set('x-app-user-id', _userId);
-  return fetch(url, { ...options, headers });
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-app-user-id",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  global: { fetch: fetchWithUserHeader },
-});
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
 
-export function setUserContext(userId, schoolId) {
-  _userId = userId; _schoolId = schoolId;
-}
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ valid: false, error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
 
-export function clearUserContext() {
-  _userId = null; _schoolId = null;
-}
-
-export async function activateUserContext(userId) {
+  let body: { code?: string; billing?: string };
   try {
-    _userId = userId; // set BEFORE the request so the header carries it
-    const { data } = await supabase.from('users').select('id,school_id').eq('id', userId).single();
-    if (data) { _userId = data.id; _schoolId = data.school_id; }
-  } catch (e) {}
-}
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ valid: false, error: "Invalid request body" }), {
+      status: 400,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
 
-const CACHEABLE = {
-  students:         'students_cache',
-  classes:          'classes_cache',
-  terms:            'terms_cache',
-  results:          'results_cache',
-  attendance:       'attendance_cache',
-  daily_attendance: 'daily_att_cache',
-  timetable:        'timetable_cache',
-  remarks:          'remarks_cache',
-};
+  const code = (body.code || "").toString().trim().toUpperCase();
+  const billing = (body.billing || "").toString().trim();
 
-const QUEUEABLE = ['results', 'attendance', 'daily_attendance', 'timetable', 'remarks'];
+  if (!code) {
+    return new Response(JSON.stringify({ valid: false, error: "No code provided" }), {
+      status: 400,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
 
-export const db = {
-  get: async (table, filters = null) => {
-    const cacheTable = CACHEABLE[table];
-    if (!navigator.onLine && cacheTable) {
-      try { return await readCache(cacheTable, filters); } catch (e) {}
-    }
-    let query = supabase.from(table).select('*');
-    if (filters) {
-      Object.entries(filters).forEach(([col, val]) => {
-        query = Array.isArray(val) ? query.in(col, val) : query.eq(col, val);
-      });
-    }
-    let data, error;
-    try {
-      const result = await Promise.race([
-        query,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('db.get network timeout')), 10000)),
-      ]);
-      data = result.data; error = result.error;
-    } catch (e) {
-      error = e;
-    }
-    if (error) {
-      if (cacheTable) { try { return await readCache(cacheTable, filters); } catch (e) {} }
-      return [];
-    }
-    if (data && cacheTable) { try { await offlineDB[cacheTable].bulkPut(data); } catch (e) {} }
-    return data || [];
-  },
+  const { data: promo, error: fetchError } = await supabase
+    .from("promo_codes")
+    .select("*")
+    .eq("code", code)
+    .eq("active", true)
+    .single();
 
-  post: async (table, payload) => {
-    if (!navigator.onLine && QUEUEABLE.includes(table)) {
-      const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
-      const record = { ...payload, id: tempId, _offline: true };
-      const cacheTable = CACHEABLE[table];
-      if (cacheTable) { try { await offlineDB[cacheTable].put(record); } catch (e) {} }
-      await enqueue(table, 'insert', payload);
-      return record;
-    }
-    let data, error;
-    try {
-      const result = await Promise.race([
-        supabase.from(table).insert(payload).select().single(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('db.post network timeout')), 10000)),
-      ]);
-      data = result.data; error = result.error;
-    } catch (e) {
-      error = e;
-    }
-    if (error) {
-      if (QUEUEABLE.includes(table)) {
-        const tempId = `offline_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
-        const record = { ...payload, id: tempId, _offline: true };
-        const cacheTable = CACHEABLE[table];
-        if (cacheTable) { try { await offlineDB[cacheTable].put(record); } catch (e) {} }
-        await enqueue(table, 'insert', payload);
-        return record;
-      }
-      console.error('db.post error:', error.message, table);
-      Sentry.captureException(new Error(`db.post [${table}]: ${error.message}`));
-      return null;
-    }
-    const cacheTable = CACHEABLE[table];
-    if (data && cacheTable) { try { await offlineDB[cacheTable].put(data); } catch (e) {} }
-    return data;
-  },
+  if (fetchError || !promo) {
+    return new Response(JSON.stringify({ valid: false, error: "Invalid or expired promo code." }), {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
 
-  patch: async (table, id, payload) => {
-    const full = { ...payload, id };
-    if (!navigator.onLine && QUEUEABLE.includes(table)) {
-      const cacheTable = CACHEABLE[table];
-      if (cacheTable) { try { await offlineDB[cacheTable].update(id, payload); } catch (e) {} }
-      await enqueue(table, 'update', full);
-      return full;
-    }
-    let data, error;
-    try {
-      const result = await Promise.race([
-        supabase.from(table).update(payload).eq('id', id).select().single(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('db.patch network timeout')), 10000)),
-      ]);
-      data = result.data; error = result.error;
-    } catch (e) {
-      error = e;
-    }
-    if (error) {
-      if (QUEUEABLE.includes(table)) {
-        const cacheTable = CACHEABLE[table];
-        if (cacheTable) { try { await offlineDB[cacheTable].update(id, payload); } catch (e) {} }
-        await enqueue(table, 'update', full);
-        return full;
-      }
-      console.error('db.patch error:', error.message, table);
-      Sentry.captureException(new Error(`db.patch [${table}]: ${error.message}`));
-      return null;
-    }
-    const cacheTable = CACHEABLE[table];
-    if (data && cacheTable) { try { await offlineDB[cacheTable].put(data); } catch (e) {} }
-    return data;
-  },
+  if (promo.billing_cycle !== billing) {
+    return new Response(
+      JSON.stringify({ valid: false, error: `This code is only valid for the ${promo.billing_cycle} plan.` }),
+      { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+    );
+  }
 
-  upsert: async (table, payload, conflictCol) => {
-    const col = conflictCol || 'id';
-    if (!navigator.onLine && QUEUEABLE.includes(table)) {
-      const cacheTable = CACHEABLE[table];
-      if (cacheTable) { try { await offlineDB[cacheTable].put(payload); } catch (e) {} }
-      await enqueue(table, 'upsert', payload, col);
-      return payload;
-    }
-    let data, error;
-    try {
-      const result = await Promise.race([
-        supabase.from(table).upsert(payload, { onConflict: col }).select().single(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('db.upsert network timeout')), 10000)),
-      ]);
-      data = result.data; error = result.error;
-    } catch (e) {
-      error = e;
-    }
-    if (error) {
-      if (QUEUEABLE.includes(table)) {
-        const cacheTable = CACHEABLE[table];
-        if (cacheTable) { try { await offlineDB[cacheTable].put(payload); } catch (e) {} }
-        await enqueue(table, 'upsert', payload, col);
-        return payload;
-      }
-      console.error('db.upsert error:', error.message, table);
-      Sentry.captureException(new Error(`db.upsert [${table}]: ${error.message}`));
-      return null;
-    }
-    const cacheTable = CACHEABLE[table];
-    if (data && cacheTable) { try { await offlineDB[cacheTable].put(data); } catch (e) {} }
-    return data;
-  },
+  if (new Date(promo.valid_until) < new Date()) {
+    return new Response(JSON.stringify({ valid: false, error: "This promo code has expired." }), {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
 
-  delete: async (table, id) => {
-    const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) {
-      console.error('db.delete error:', error.message);
-      Sentry.captureException(new Error(`db.delete [${table}]: ${error.message}`));
-    }
-    const cacheTable = CACHEABLE[table];
-    if (cacheTable) { try { await offlineDB[cacheTable].delete(id); } catch (e) {} }
-  },
-};
+  if (promo.times_used >= promo.max_uses) {
+    return new Response(JSON.stringify({ valid: false, error: "This promo code has already been fully redeemed." }), {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+
+  return new Response(
+    JSON.stringify({ valid: true, code: promo.code, discount: promo.discount }),
+    { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } }
+  );
+});
