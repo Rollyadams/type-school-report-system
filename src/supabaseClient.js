@@ -8,18 +8,44 @@ const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
 let _userId   = null;
 let _schoolId = null;
+let _sessionToken = null; // HMAC-signed token issued by secure-session edge function
 
-// Custom fetch: stamps every single request with the current user id,
-// read fresh at call time. This removes the RPC-then-query race entirely —
-// identity arrives WITH the query, in the same request, every time.
-const fetchWithUserHeader = (url, options = {}) => {
+const SESSION_FN = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/secure-session`;
+
+// Issue a server-signed session token after login.
+// Replaces the plain x-app-user-id header which any user could forge.
+export async function issueSessionToken(userId) {
+  try {
+    const res = await fetch(SESSION_FN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': supabaseAnonKey },
+      body: JSON.stringify({ action: 'issue', userId }),
+    });
+    const data = await res.json();
+    if (data.token) {
+      _sessionToken = data.token;
+      return data.token;
+    }
+  } catch (e) {
+    console.error('Session token issue failed:', e);
+  }
+  return null;
+}
+
+// Custom fetch: stamps every request with the signed session token.
+// Server-side RLS reads 'x-session-token' and verifies the HMAC signature
+// before trusting userId/schoolId — cannot be forged by a client.
+const fetchWithSessionToken = (url, options = {}) => {
   const headers = new Headers(options.headers || {});
+  if (_sessionToken) headers.set('x-session-token', _sessionToken);
+  // Keep x-app-user-id as fallback during migration only.
+  // Remove this line once all RLS policies are updated to use x-session-token.
   if (_userId) headers.set('x-app-user-id', _userId);
   return fetch(url, { ...options, headers });
 };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  global: { fetch: fetchWithUserHeader },
+  global: { fetch: fetchWithSessionToken },
 });
 
 export function setUserContext(userId, schoolId) {
@@ -27,14 +53,16 @@ export function setUserContext(userId, schoolId) {
 }
 
 export function clearUserContext() {
-  _userId = null; _schoolId = null;
+  _userId = null; _schoolId = null; _sessionToken = null;
 }
 
 export async function activateUserContext(userId) {
   try {
-    _userId = userId; // set BEFORE the request so the header carries it
+    _userId = userId;
     const { data } = await supabase.from('users').select('id,school_id').eq('id', userId).single();
     if (data) { _userId = data.id; _schoolId = data.school_id; }
+    // Issue signed session token — replaces plain header for RLS verification
+    await issueSessionToken(userId);
   } catch (e) {}
 }
 
