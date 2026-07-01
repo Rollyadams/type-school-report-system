@@ -517,29 +517,24 @@ function Login({ onLogin, onRegister }) {
     if(rl.blocked){setErr(rl.message);return;}
     setLoading(true);setErr("");
     try{
-      const users=await db.get("users",{email});
-      if(!users.length){
-        await recordLoginAttempt(email, false);
-        setErr("User not found");setLoading(false);return;
-      }
-      if(!users[0].password){setErr("No password set for this account. Contact your administrator.");await recordLoginAttempt(email,false);setLoading(false);return;}
-      const hashed = await hashPassword(pass);
-      const storedPw = users[0].password;
-      const match = isHashed(storedPw) ? hashed === storedPw : pass === storedPw;
-      if(!match){
+      const VERIFY_FN = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/verify-login`;
+      const res = await fetch(VERIFY_FN, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY },
+        body: JSON.stringify({ email, password: pass }),
+      });
+      const result = await res.json();
+      if (!result.match) {
         await recordLoginAttempt(email, false);
         const rl2 = await checkRateLimit(email);
         setErr(rl2.blocked
           ? "Too many failed attempts. Account locked for 15 minutes."
           : `Incorrect password. ${rl2.remaining} attempt${rl2.remaining!==1?"s":""} remaining.`
         );
-        setLoading(false);return;
+        setLoading(false); return;
       }
-      recordLoginAttempt(email, true); // fire and forget — don't await
-      if (!isHashed(storedPw)) {
-        const upgraded = await hashPassword(pass);
-        await supabase.from('users').update({ password: upgraded }).eq('id', users[0].id);
-      }
+      const users = [result.user];
+      recordLoginAttempt(email, true); // fire and forget
       // Block login for staff of a deactivated school. super_admin has no
       // school_id so this check never applies to that account.
       if (users[0].school_id) {
