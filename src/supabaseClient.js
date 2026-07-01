@@ -54,6 +54,8 @@ export function setUserContext(userId, schoolId) {
 
 export function clearUserContext() {
   _userId = null; _schoolId = null; _sessionToken = null;
+  // Prevent offline queue from flushing as this user after logout
+  try { const { setQueueUserId } = require('./syncEngine'); setQueueUserId(null); } catch(e) {}
 }
 
 export async function activateUserContext(userId) {
@@ -61,8 +63,9 @@ export async function activateUserContext(userId) {
     _userId = userId;
     const { data } = await supabase.from('users').select('id,school_id').eq('id', userId).single();
     if (data) { _userId = data.id; _schoolId = data.school_id; }
-    // Issue signed session token — replaces plain header for RLS verification
     await issueSessionToken(userId);
+    // Tell sync engine which user owns future queue items
+    try { const { setQueueUserId } = require('./syncEngine'); setQueueUserId(userId); } catch(e) {}
   } catch (e) {}
 }
 
