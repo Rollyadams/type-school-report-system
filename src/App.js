@@ -400,26 +400,37 @@ function ForgotPassword({ onBack }) {
   const [loading,setLoading] = useState(false);
   const [err,setErr]         = useState("");
   const [userId,setUserId]   = useState(null);
-  const [generatedCode,setGeneratedCode] = useState(null);
+  const [resetToken,setResetToken] = useState(null); // server-issued token, not the raw code
+
+  const RESET_FN = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/password-reset`;
+  const callReset = async (body) => {
+    const res = await fetch(RESET_FN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY },
+      body: JSON.stringify(body),
+    });
+    return res.json();
+  };
 
   const requestReset = async () => {
     if (!email.trim()) { setErr("Enter your email address"); return; }
     setLoading(true); setErr("");
-    const users = await db.get("users", { email: email.trim().toLowerCase() });
-    if (!users.length) { setErr("No account found with that email."); setLoading(false); return; }
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expires   = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-    await supabase.from("users").update({ reset_code: resetCode, reset_expires: expires }).eq("id", users[0].id);
-    setUserId(users[0].id);
-    setGeneratedCode(resetCode);
+    // Always shows success — server never reveals if email exists (prevents enumeration)
+    await callReset({ action: 'request', email: email.trim().toLowerCase() });
     setStep("verify");
     setLoading(false);
   };
 
-  const verifyCode = () => {
+  const verifyCode = async () => {
     if (!code.trim()) { setErr("Enter the 6-digit code"); return; }
-    if (code.trim() !== generatedCode) { setErr("Invalid code. Try again."); return; }
+    setLoading(true); setErr("");
+    const data = await callReset({ action: 'verify', email: email.trim().toLowerCase(), code: code.trim() });
+    if (!data.ok) { setErr(data.error || "Invalid code."); setLoading(false); return; }
+    // Server returns a signed token — never the raw code. Token verified server-side on reset.
+    setUserId(data.userId);
+    setResetToken(data.token);
     setErr(""); setStep("reset");
+    setLoading(false);
   };
 
   const resetPassword = async () => {
@@ -427,8 +438,9 @@ function ForgotPassword({ onBack }) {
     if (newPass.length < 6) { setErr("Password must be at least 6 characters"); return; }
     if (newPass !== confirm) { setErr("Passwords do not match"); return; }
     setLoading(true); setErr("");
-    const hashed = await hashPassword(newPass);
-    await supabase.from("users").update({ password: hashed, reset_code: null, reset_expires: null }).eq("id", userId);
+    // Password hashed SERVER-SIDE in the edge function — never client-side
+    const data = await callReset({ action: 'reset', userId, token: resetToken, password: newPass });
+    if (!data.ok) { setErr(data.error || "Reset failed. Start over."); setLoading(false); return; }
     setLoading(false); setStep("done");
   };
 
