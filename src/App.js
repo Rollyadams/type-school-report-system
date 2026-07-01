@@ -517,7 +517,7 @@ function Login({ onLogin, onRegister }) {
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const [mode,setMode]=useState("staff");
-  const [admNum,setAdmNum]=useState(""); const [parentLoading,setParentLoading]=useState(false);
+  const [admNum,setAdmNum]=useState(""); const [dob,setDob]=useState(""); const [parentLoading,setParentLoading]=useState(false);
   const [parentErr,setParentErr]=useState(""); const [parentData,setParentData]=useState(null);
   const [showForgot,setShowForgot]=useState(false);
 
@@ -570,12 +570,18 @@ function Login({ onLogin, onRegister }) {
 
   const checkResult = async () => {
     if(!admNum.trim()){setParentErr("Enter admission number");return;}
+    if(!dob.trim()){setParentErr("Enter date of birth");return;}
     setParentLoading(true);setParentErr("");setParentData(null);
-    clearUserContext(); // parent is unauthenticated — never inherit a stale/leftover staff RLS context
+    clearUserContext();
     try{
-      const students=await db.get("students",{admission_number:admNum.trim()});
-      if(!students.length){setParentErr("No student found with that admission number");setParentLoading(false);return;}
-      const student=students[0];
+      const res = await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/check-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY },
+        body: JSON.stringify({ admission_number: admNum.trim(), dob: dob.trim() }),
+      });
+      const data = await res.json();
+      if(!data.ok){setParentErr(data.error || "No student found.");setParentLoading(false);return;}
+      const student = data.student;
       const [classes,terms,schools,sessions]=await Promise.all([
         db.get("classes",{school_id:student.school_id}),
         db.get("terms",{school_id:student.school_id}),
@@ -628,6 +634,7 @@ function Login({ onLogin, onRegister }) {
         ):(
           <>
             <div style={{marginBottom:16}}><label style={S.label}>Admission Number</label><input style={S.input} value={admNum} onChange={e=>setAdmNum(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkResult()} placeholder="e.g. CBS/2024/001"/></div>
+            <div style={{marginBottom:16}}><label style={S.label}>Student Date of Birth</label><input type="date" style={S.input} value={dob} onChange={e=>setDob(e.target.value)}/></div>
             {parentErr&&<div style={{color:"#ef4444",fontSize:13,marginBottom:12,textAlign:"center"}}>{parentErr}</div>}
             <button onClick={checkResult} disabled={parentLoading} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{parentLoading?"Checking…":"View My Child's Result →"}</button>
             <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number. You'll be able to switch between sessions and terms after.</p>
@@ -5206,4 +5213,3 @@ export default function App() {
 
   return <Login onLogin={handleLogin} onRegister={()=>setScreen("register")}/>;
 }
-
