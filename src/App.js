@@ -600,7 +600,7 @@ function Login({ onLogin, onRegister }) {
         db.get("remarks",{student_id:student.id,term_id:term.id}),
       ]);
       setParentData({student,cls,term,terms,sessions,subjects,results,allStudents:classmatesAll,allResults,attendance:attendance[0]||null,remarks:remarks[0]||null,school:schools[0]||null});
-    }catch(e){setParentErr("Error fetching result. Try again.");}
+    }catch(e){setParentErr(`Error: ${e.message || JSON.stringify(e)}`);}
     setParentLoading(false);
   };
 
