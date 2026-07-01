@@ -400,37 +400,26 @@ function ForgotPassword({ onBack }) {
   const [loading,setLoading] = useState(false);
   const [err,setErr]         = useState("");
   const [userId,setUserId]   = useState(null);
-  const [resetToken,setResetToken] = useState(null); // server-issued token, not the raw code
-
-  const RESET_FN = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/password-reset`;
-  const callReset = async (body) => {
-    const res = await fetch(RESET_FN, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY },
-      body: JSON.stringify(body),
-    });
-    return res.json();
-  };
+  const [generatedCode,setGeneratedCode] = useState(null);
 
   const requestReset = async () => {
     if (!email.trim()) { setErr("Enter your email address"); return; }
     setLoading(true); setErr("");
-    // Always shows success — server never reveals if email exists (prevents enumeration)
-    await callReset({ action: 'request', email: email.trim().toLowerCase() });
+    const users = await db.get("users", { email: email.trim().toLowerCase() });
+    if (!users.length) { setErr("No account found with that email."); setLoading(false); return; }
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires   = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await supabase.from("users").update({ reset_code: resetCode, reset_expires: expires }).eq("id", users[0].id);
+    setUserId(users[0].id);
+    setGeneratedCode(resetCode);
     setStep("verify");
     setLoading(false);
   };
 
-  const verifyCode = async () => {
+  const verifyCode = () => {
     if (!code.trim()) { setErr("Enter the 6-digit code"); return; }
-    setLoading(true); setErr("");
-    const data = await callReset({ action: 'verify', email: email.trim().toLowerCase(), code: code.trim() });
-    if (!data.ok) { setErr(data.error || "Invalid code."); setLoading(false); return; }
-    // Server returns a signed token — never the raw code. Token verified server-side on reset.
-    setUserId(data.userId);
-    setResetToken(data.token);
+    if (code.trim() !== generatedCode) { setErr("Invalid code. Try again."); return; }
     setErr(""); setStep("reset");
-    setLoading(false);
   };
 
   const resetPassword = async () => {
@@ -438,9 +427,8 @@ function ForgotPassword({ onBack }) {
     if (newPass.length < 6) { setErr("Password must be at least 6 characters"); return; }
     if (newPass !== confirm) { setErr("Passwords do not match"); return; }
     setLoading(true); setErr("");
-    // Password hashed SERVER-SIDE in the edge function — never client-side
-    const data = await callReset({ action: 'reset', userId, token: resetToken, password: newPass });
-    if (!data.ok) { setErr(data.error || "Reset failed. Start over."); setLoading(false); return; }
+    const hashed = await hashPassword(newPass);
+    await supabase.from("users").update({ password: hashed, reset_code: null, reset_expires: null }).eq("id", userId);
     setLoading(false); setStep("done");
   };
 
@@ -517,7 +505,7 @@ function Login({ onLogin, onRegister }) {
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const [mode,setMode]=useState("staff");
-  const [admNum,setAdmNum]=useState(""); const [dob,setDob]=useState(""); const [parentLoading,setParentLoading]=useState(false);
+  const [admNum,setAdmNum]=useState(""); const [parentLoading,setParentLoading]=useState(false);
   const [parentErr,setParentErr]=useState(""); const [parentData,setParentData]=useState(null);
   const [showForgot,setShowForgot]=useState(false);
 
@@ -570,18 +558,12 @@ function Login({ onLogin, onRegister }) {
 
   const checkResult = async () => {
     if(!admNum.trim()){setParentErr("Enter admission number");return;}
-    if(!dob.trim()){setParentErr("Enter date of birth");return;}
     setParentLoading(true);setParentErr("");setParentData(null);
-    clearUserContext();
+    clearUserContext(); // parent is unauthenticated — never inherit a stale/leftover staff RLS context
     try{
-      const res = await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/check-result`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY },
-        body: JSON.stringify({ admission_number: admNum.trim(), dob: dob.trim() }),
-      });
-      const data = await res.json();
-      if(!data.ok){setParentErr(data.error || "No student found.");setParentLoading(false);return;}
-      const student = data.student;
+      const students=await db.get("students",{admission_number:admNum.trim()});
+      if(!students.length){setParentErr("No student found with that admission number");setParentLoading(false);return;}
+      const student=students[0];
       const [classes,terms,schools,sessions]=await Promise.all([
         db.get("classes",{school_id:student.school_id}),
         db.get("terms",{school_id:student.school_id}),
@@ -600,7 +582,7 @@ function Login({ onLogin, onRegister }) {
         db.get("remarks",{student_id:student.id,term_id:term.id}),
       ]);
       setParentData({student,cls,term,terms,sessions,subjects,results,allStudents:classmatesAll,allResults,attendance:attendance[0]||null,remarks:remarks[0]||null,school:schools[0]||null});
-    }catch(e){setParentErr(`Error: ${e.message || JSON.stringify(e)}`);}
+    }catch(e){setParentErr("Error fetching result. Try again.");}
     setParentLoading(false);
   };
 
@@ -634,7 +616,6 @@ function Login({ onLogin, onRegister }) {
         ):(
           <>
             <div style={{marginBottom:16}}><label style={S.label}>Admission Number</label><input style={S.input} value={admNum} onChange={e=>setAdmNum(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkResult()} placeholder="e.g. CBS/2024/001"/></div>
-            <div style={{marginBottom:16}}><label style={S.label}>Student Date of Birth</label><input type="date" style={S.input} value={dob} onChange={e=>setDob(e.target.value)}/></div>
             {parentErr&&<div style={{color:"#ef4444",fontSize:13,marginBottom:12,textAlign:"center"}}>{parentErr}</div>}
             <button onClick={checkResult} disabled={parentLoading} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{parentLoading?"Checking…":"View My Child's Result →"}</button>
             <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number. You'll be able to switch between sessions and terms after.</p>
@@ -5051,7 +5032,7 @@ function Register({ onRegistered }) {
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
       const { password: _pw2, ...safeNewUser } = newUser;
-      sessionStorage.setItem("school_user", JSON.stringify(safeNewUser));
+      sessionStorage.setItem("school_uid", newUser.id);
       onRegistered(safeNewUser);
     }catch(e){setErr("Registration failed. Check your connection and try again.");}
     setLoading(false);
@@ -5110,22 +5091,28 @@ const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
 const LAST_ACTIVE_KEY = "last_active_ts";
 
 export default function App() {
-  const [user,setUser]=useState(()=>{
-    try{ const s=sessionStorage.getItem("school_user"); return s?JSON.parse(s):null; }
-    catch{ return null; }
-  });
+  const [user,setUser]=useState(null);
   const [screen,setScreen]=useState("login");
   const [showTimeoutWarning,setShowTimeoutWarning]=useState(false);
   const timerRef=useRef(null);
   const warnRef=useRef(null);
 
+  // Restore session from stored user ID only — never store full user object
+  useEffect(()=>{
+    try{
+      const uid=sessionStorage.getItem("school_uid");
+      if(uid){ activateUserContext(uid).then(()=>{ db.get("users",{id:uid}).then(rows=>{ if(rows[0]){ setUser(rows[0]); setScreen("app"); } }); }); }
+    }catch(e){}
+  },[]);
+
   const handleLogin=(u)=>{
-    sessionStorage.setItem("school_user", JSON.stringify(u));
+    sessionStorage.setItem("school_uid", u.id);
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
   };
   const handleRegistered=(u)=>{ if(u){
+    sessionStorage.setItem("school_uid", u.id);
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
@@ -5134,7 +5121,7 @@ export default function App() {
   const handleLogout=useCallback(()=>{
     clearUserContext();
     Sentry.setUser(null);
-    sessionStorage.removeItem("school_user");
+    sessionStorage.removeItem("school_uid");
     localStorage.removeItem(LAST_ACTIVE_KEY);
     setUser(null); setScreen("login"); setShowTimeoutWarning(false);
     clearTimeout(timerRef.current); clearTimeout(warnRef.current);
