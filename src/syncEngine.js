@@ -1,8 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { offlineDB } from './offlineDB';
-import { supabase } from './supabaseClient';
+import { supabase, setUserContext, clearUserContext } from './supabaseClient';
 
 const MAX_RETRIES = 5;
+
+// Import _userId at enqueue time so each queued item carries its owner.
+// On flush, identity is restored to match the item — not whoever is
+// currently logged in. Items from a different user are skipped.
+let _currentUserId = null;
+export function setQueueUserId(userId) { _currentUserId = userId; }
 
 export async function enqueue(table, operation, payload, conflictCol) {
   await offlineDB.queue.add({
@@ -10,6 +16,7 @@ export async function enqueue(table, operation, payload, conflictCol) {
     operation,
     payload,
     conflictCol: conflictCol || null,
+    userId: _currentUserId, // ← captured at enqueue time
     status: 'pending',
     retries: 0,
     created_at: new Date().toISOString(),
@@ -19,6 +26,11 @@ export async function enqueue(table, operation, payload, conflictCol) {
 }
 
 async function processItem(item) {
+  // Skip items that belong to a different user than currently logged in.
+  // This prevents offline writes from one session leaking into another.
+  if (item.userId && item.userId !== _currentUserId) {
+    return false;
+  }
   await offlineDB.queue.update(item.id, { status: 'syncing', last_attempt: new Date().toISOString() });
   try {
     let error;
