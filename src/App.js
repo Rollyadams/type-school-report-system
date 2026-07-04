@@ -3696,6 +3696,11 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
   const [billing, setBilling]   = useState('monthly');
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
+
+  // Preload Paystack script on mount so it's ready before the user taps Pay.
+  // This avoids the await inside the click handler which breaks the user
+  // gesture context on live mode (live is stricter than test about this).
+  useEffect(() => { loadPaystack(); }, []);
   const [promoInput, setPromoInput]   = useState('');
   const [promoApplied, setPromoApplied] = useState(null); // { code, discount }
   const [promoError, setPromoError]     = useState('');
@@ -3754,7 +3759,8 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
       return;
     }
     setLoading(true);
-    await loadPaystack();
+    // Script already loaded on mount — no await needed here
+    if (!window.PaystackPop) await loadPaystack();
     setLoading(false);
     const handler = window.PaystackPop.setup({
       key:       PAYSTACK_PUBLIC_KEY,
@@ -3786,7 +3792,7 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
       },
       onCancel: () => {},
     });
-    handler.open();
+    handler.openIframe();
   };
 
   return (
