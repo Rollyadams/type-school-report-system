@@ -3786,7 +3786,7 @@ function BillingScreen({ school, user, onUpgradeSuccess }) {
       },
       onCancel: () => {},
     });
-    handler.openIframe();
+    handler.open();
   };
 
   return (
