@@ -181,34 +181,14 @@ const S = {
 };
 
 // ── PDF Generator ─────────────────────────────────────────────
-const JSPDF_SOURCES = [
-  "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
-  "https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js",
-  "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
-];
-
-const loadScriptOnce = (src) => new Promise((resolve, reject) => {
-  const existing = document.querySelector(`script[src="${src}"]`);
-  if (existing && window.jspdf) { resolve(window.jspdf); return; }
+const loadJsPDF = () => new Promise((resolve, reject) => {
+  if (window.jspdf) { resolve(window.jspdf); return; }
   const s = document.createElement("script");
-  s.src = src;
-  s.onload = () => window.jspdf ? resolve(window.jspdf) : reject(new Error("jsPDF loaded but window.jspdf missing"));
-  s.onerror = () => reject(new Error(`Failed to load jsPDF from ${src}`));
+  s.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+  s.onload = () => resolve(window.jspdf);
+  s.onerror = () => reject(new Error("Failed to load jsPDF"));
   document.head.appendChild(s);
 });
-
-const loadJsPDF = async () => {
-  if (window.jspdf) return window.jspdf;
-  let lastErr;
-  for (const src of JSPDF_SOURCES) {
-    try {
-      return await loadScriptOnce(src);
-    } catch (err) {
-      lastErr = err;
-    }
-  }
-  throw new Error("Failed to load jsPDF: no CDN reachable. Check your internet connection and try again.");
-};
 
 const generateReportPDF = async (student, cls, term, subjects, results, attendance, remarks, allStudents, allResults, school, logoDataUrl) => {
   const { jsPDF } = await loadJsPDF();
@@ -390,7 +370,7 @@ async function checkRateLimit(email) {
       supabase.from("login_attempts").select("id,attempted_at").eq("email",email.toLowerCase()).eq("success",false).gte("attempted_at",windowStart).order("attempted_at",{ascending:false}),
       new Promise((_,r) => setTimeout(()=>r(new Error("timeout")), 3000))
     ]);
-    if (error) return { blocked: true, message: "Unable to verify login attempts right now. Please try again shortly." };
+    if (error) return { blocked: false };
     if (data.length >= RATE_LIMIT_MAX) {
       const oldest = new Date(data[data.length - 1].attempted_at).getTime();
       const unlockAt = oldest + RATE_LIMIT_WINDOW_MS;
@@ -398,7 +378,7 @@ async function checkRateLimit(email) {
       return { blocked: true, message: `Too many failed attempts. Try again in ${mins} minute${mins!==1?"s":""}.` };
     }
     return { blocked: false, remaining: RATE_LIMIT_MAX - data.length };
-  } catch { return { blocked: true, message: "Unable to verify login attempts right now. Please try again shortly." }; }
+  } catch { return { blocked: false }; }
 }
 
 async function recordLoginAttempt(email, success) {
@@ -525,7 +505,7 @@ function Login({ onLogin, onRegister }) {
   const [email,setEmail]=useState(""); const [pass,setPass]=useState("");
   const [err,setErr]=useState(""); const [loading,setLoading]=useState(false);
   const [mode,setMode]=useState("staff");
-  const [admNum,setAdmNum]=useState(""); const [parentDob,setParentDob]=useState(""); const [parentLoading,setParentLoading]=useState(false);
+  const [admNum,setAdmNum]=useState(""); const [parentLoading,setParentLoading]=useState(false);
   const [parentErr,setParentErr]=useState(""); const [parentData,setParentData]=useState(null);
   const [showForgot,setShowForgot]=useState(false);
 
@@ -573,25 +553,12 @@ function Login({ onLogin, onRegister }) {
 
   const checkResult = async () => {
     if(!admNum.trim()){setParentErr("Enter admission number");return;}
-    if(!parentDob){setParentErr("Enter your child's date of birth");return;}
     setParentLoading(true);setParentErr("");setParentData(null);
     clearUserContext(); // parent is unauthenticated — never inherit a stale/leftover staff RLS context
     try{
       const students=await db.get("students",{admission_number:admNum.trim()});
-      // Admission numbers are often sequential/guessable (e.g. CBS/2024/001),
-      // so anyone could enumerate them and view another child's grades.
-      // Date of birth is a second factor only the parent/guardian should
-      // know, and it's compared server-side data, not just client-side —
-      // a wrong DOB gives the exact same "not found" message as a wrong
-      // admission number so no info leaks about which field was wrong.
-      const genericErr="No student found with that admission number and date of birth";
-      if(!students.length){setParentErr(genericErr);setParentLoading(false);return;}
-      // Older records may predate the DOB requirement and have it blank.
-      // Rather than lock those families out, fall back to admission-number
-      // only for that specific record (still logged so the school can
-      // backfill DOB later).
-      const student=students.find(s=>s.date_of_birth===parentDob) || students.find(s=>!s.date_of_birth);
-      if(!student){setParentErr(genericErr);setParentLoading(false);return;}
+      if(!students.length){setParentErr("No student found with that admission number");setParentLoading(false);return;}
+      const student=students[0];
       const [classes,terms,schools,sessions]=await Promise.all([
         db.get("classes",{school_id:student.school_id}),
         db.get("terms",{school_id:student.school_id}),
@@ -644,10 +611,9 @@ function Login({ onLogin, onRegister }) {
         ):(
           <>
             <div style={{marginBottom:16}}><label style={S.label}>Admission Number</label><input style={S.input} value={admNum} onChange={e=>setAdmNum(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkResult()} placeholder="e.g. CBS/2024/001"/></div>
-            <div style={{marginBottom:16}}><label style={S.label}>Child's Date of Birth</label><input style={S.input} type="date" value={parentDob} onChange={e=>setParentDob(e.target.value)} onKeyDown={e=>e.key==="Enter"&&checkResult()}/></div>
             {parentErr&&<div style={{color:"#ef4444",fontSize:13,marginBottom:12,textAlign:"center"}}>{parentErr}</div>}
             <button onClick={checkResult} disabled={parentLoading} style={{...S.btn("#10b981"),width:"100%",padding:"13px",fontSize:15}}>{parentLoading?"Checking…":"View My Child's Result →"}</button>
-            <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number and date of birth. You'll be able to switch between sessions and terms after.</p>
+            <p style={{textAlign:"center",color:"#94a3b8",fontSize:12,marginTop:12}}>Enter your child's admission number. You'll be able to switch between sessions and terms after.</p>
           </>
         )}
         <p style={{textAlign:"center",color:"#94a3b8",fontSize:13,marginTop:20,borderTop:"1px solid #f1f5f9",paddingTop:16}}>
@@ -867,13 +833,9 @@ function SchoolInfoForm({ school, reload }) {
     setScaleErr("");
     setSaving(true);
     const payload={...form, grade_scale: sorted};
-    const result = school?.id ? await db.patch("schools",school.id,payload) : await db.post("schools",payload);
-    setSaving(false);
-    if(!result){
-      alert("Failed to save school settings. Please check your connection and try again.");
-      return;
-    }
-    setSaved(true); setTimeout(()=>setSaved(false),3000); reload();
+    if(school?.id) await db.patch("schools",school.id,payload);
+    else await db.post("schools",payload);
+    setSaving(false); setSaved(true); setTimeout(()=>setSaved(false),3000); reload();
   };
 
   const handleLogoUpload=async(e)=>{
@@ -4781,13 +4743,6 @@ function TeacherDash({ user, onLogout }) {
   const [currentResults,setCurrentResults]=useState([]); const [currentAttendance,setCurrentAttendance]=useState(null);
   const [currentRemarks,setCurrentRemarks]=useState(null); const [logoDataUrl,setLogoDataUrl]=useState(null);
   const [loading,setLoading]=useState(true);
-  // The teacher's own class assignment can change (Principal reassigns a
-  // class) while this dashboard is already open in the browser. `user` is a
-  // prop passed down once at login, so we keep a local, live copy of the
-  // assignment fields and refresh it from Supabase alongside classes —
-  // otherwise the "No class assigned" banner keeps showing stale data from
-  // the moment this session started.
-  const [liveClassIds,setLiveClassIds]=useState((user.class_ids&&user.class_ids.length)?user.class_ids:(user.class_id?[user.class_id]:[]));
 
   useEffect(()=>{loadData();},[]);
 
@@ -4796,25 +4751,15 @@ function TeacherDash({ user, onLogout }) {
   // without the teacher needing to fully reload the page. This refreshes
   // ALL of the teacher's assigned classes (important for multi-class
   // teachers), not just whichever one happens to be selected.
-  const refreshMyClasses=useCallback(async()=>{
-    // Refetch the teacher's own row first — this is the actual source of
-    // truth for which classes they're assigned to, and it can change after
-    // the session started.
-    let myClassIds=liveClassIds;
-    try{
-      const rows=await db.get("users",{id:user.id});
-      const fresh=rows && rows[0];
-      if(fresh){
-        myClassIds=(fresh.class_ids&&fresh.class_ids.length)?fresh.class_ids:(fresh.class_id?[fresh.class_id]:[]);
-        setLiveClassIds(myClassIds);
-      }
-    }catch(e){}
-    const c=await db.get("classes",{school_id:user.school_id});
-    const filtered=myClassIds.length?c.filter(cls=>myClassIds.includes(cls.id)):c;
-    setClasses(filtered);
-  },[user.school_id,user.id,liveClassIds]);
+  const refreshMyClasses=useCallback(()=>{
+    db.get("classes",{school_id:user.school_id}).then(c=>{
+      const myClassIds=(user.class_ids&&user.class_ids.length)?user.class_ids:(user.class_id?[user.class_id]:[]);
+      const filtered=myClassIds.length?c.filter(cls=>myClassIds.includes(cls.id)):c;
+      setClasses(filtered);
+    });
+  },[user.school_id,user.class_ids,user.class_id]);
 
-  useEffect(()=>{ if(tab==="results") refreshMyClasses(); },[tab]);
+  useEffect(()=>{ if(tab==="results") refreshMyClasses(); },[tab,refreshMyClasses]);
   const loadData=async()=>{
     setLoading(true);
     const schoolId=user.school_id;
@@ -4955,7 +4900,7 @@ function TeacherDash({ user, onLogout }) {
     {id:"report",     label:"View Reports",     icon:"📋", desc:"View & download report cards"},
   ];
 
-  const myClassIds = liveClassIds;
+  const myClassIds = (user.class_ids && user.class_ids.length) ? user.class_ids : (user.class_id ? [user.class_id] : []);
 
   const teacherResultsJsx = (
     <div>
