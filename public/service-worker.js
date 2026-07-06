@@ -1,4 +1,4 @@
-const CACHE_VERSION  = 'v6';
+const CACHE_VERSION  = 'v7';
 const SHELL_CACHE    = `src-shell-${CACHE_VERSION}`;
 const API_CACHE      = `src-api-${CACHE_VERSION}`;
 const CDN_CACHE      = `src-cdn-${CACHE_VERSION}`;
@@ -54,6 +54,16 @@ self.addEventListener('fetch', event => {
 
   if (url.origin === self.location.origin) {
     if (request.headers.get('accept')?.includes('text/html')) {
+      event.respondWith(networkFirst(request, SHELL_CACHE, 4000));
+    } else if (/\.(js|css)$/.test(url.pathname)) {
+      // Hashed build assets (main.<hash>.js, main.<hash>.css). These
+      // filenames change on every deploy, so cache-first should be safe in
+      // theory — but if the HTML that references them was ever served
+      // stale (e.g. a slow network caused the HTML networkFirst fetch to
+      // time out and fall back to an old cached HTML), that old HTML
+      // points at an old JS filename which then gets served instantly
+      // from cache forever, and the PWA never picks up new code. Network
+      // first here closes that gap; falls back to cache only if offline.
       event.respondWith(networkFirst(request, SHELL_CACHE, 4000));
     } else {
       event.respondWith(cacheFirst(request, SHELL_CACHE));
