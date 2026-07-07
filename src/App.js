@@ -299,6 +299,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   y += 24;
 
   if(remarks?.teacher_remark){
+    if(y>260){doc.addPage();y=20;}
     doc.setFillColor(240,253,244); doc.rect(10,y,W-20,18,"F");
     doc.setDrawColor(16,185,129); doc.setLineWidth(0.5); doc.line(10,y,10,y+18);
     doc.setTextColor(16,185,129); doc.setFontSize(7); doc.setFont("helvetica","bold"); doc.text("CLASS TEACHER'S REMARKS",14,y+6);
@@ -307,6 +308,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
     y += 22;
   }
   if(remarks?.principal_remark){
+    if(y>260){doc.addPage();y=20;}
     doc.setFillColor(239,246,255); doc.rect(10,y,W-20,18,"F");
     doc.setDrawColor(59,130,246); doc.line(10,y,10,y+18);
     doc.setTextColor(59,130,246); doc.setFontSize(7); doc.setFont("helvetica","bold"); doc.text("PRINCIPAL'S REMARKS",14,y+6);
@@ -315,6 +317,7 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
     y += 22;
   }
   if(term?.resumption_date){
+    if(y>270){doc.addPage();y=20;}
     doc.setFillColor(255,247,237); doc.rect(10,y,W-20,14,"F");
     doc.setDrawColor(251,146,60); doc.line(10,y,10,y+14);
     doc.setTextColor(234,88,12); doc.setFont("helvetica","bold");
@@ -2305,7 +2308,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
             <p style={{margin:0,color:"#c7d2fe",fontSize:11}}>{school?.name||"School"} • Official Academic Report Card • {term?.name}</p>
           </div>
         </div>
-        <style>{`@media print{body *{visibility:hidden;}#report-card,#report-card *{visibility:visible;}#report-card{position:fixed;top:0;left:0;width:100%;box-shadow:none;border-radius:0;margin:0;}}`}</style>
+        <style>{`@media print{body *{visibility:hidden;}#report-card,#report-card *{visibility:visible;box-sizing:border-box;}#report-card{position:fixed;top:0;left:0;width:100%;box-shadow:none;border-radius:0;margin:0;box-sizing:border-box;}}`}</style>
       </div>
     );
   }
