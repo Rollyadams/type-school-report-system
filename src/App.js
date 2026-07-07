@@ -840,6 +840,11 @@ function SchoolSettings({ school, sessions, terms, students, classes, reload, sc
 
 function SchoolInfoForm({ school, reload }) {
   const [form,setForm]=useState({name:school?.name||"",address:school?.address||"",phone:school?.phone||"",email:school?.email||"",logo_url:school?.logo_url||""});
+  useEffect(()=>{
+    if(school){
+      setForm(p=>({...p,name:school.name||"",address:school.address||"",phone:school.phone||"",email:school.email||"",logo_url:school.logo_url||p.logo_url}));
+    }
+  },[school]);
   const [saving,setSaving]=useState(false); const [saved,setSaved]=useState(false); const [uploading,setUploading]=useState(false);
   const [gradeScale,setGradeScale]=useState(normalizeGradeScale(school?.grade_scale));
   const [scaleErr,setScaleErr]=useState("");
@@ -878,18 +883,50 @@ function SchoolInfoForm({ school, reload }) {
 
   const handleLogoUpload=async(e)=>{
     const file=e.target.files[0]; if(!file) return;
+
+    if(!file.type.startsWith("image/")){
+      alert("Please choose an image file (PNG, JPG, etc.)");
+      e.target.value="";
+      return;
+    }
+    if(file.size>3*1024*1024){
+      alert("Logo image is too large. Please choose a file under 3MB.");
+      e.target.value="";
+      return;
+    }
+
     setUploading(true);
     try{
       const ext=file.name.split(".").pop();
-      const path=`logos/school_logo_${Date.now()}.${ext}`;
-      const {error:upErr}=await supabase.storage.from("school-assets").upload(path,file,{upsert:true});
+      const path=`logos/school_${school?.id||"new"}_${Date.now()}.${ext}`;
+
+      let {error:upErr}=await supabase.storage.from("school-assets").upload(path,file,{upsert:true,cacheControl:"3600"});
+
+      if(upErr && /bucket.*not.*found/i.test(upErr.message||"")){
+        await supabase.storage.createBucket("school-assets",{public:true}).catch(()=>{});
+        const retry=await supabase.storage.from("school-assets").upload(path,file,{upsert:true,cacheControl:"3600"});
+        upErr=retry.error;
+      }
       if(upErr) throw upErr;
+
       const {data}=supabase.storage.from("school-assets").getPublicUrl(path);
-      setForm(p=>({...p,logo_url:data.publicUrl}));
+      const newUrl=data.publicUrl;
+
+      setForm(p=>({...p,logo_url:newUrl}));
+
+      if(school?.id){
+        const result=await db.patch("schools",school.id,{logo_url:newUrl});
+        if(!result){
+          alert("Logo uploaded, but saving it to your school profile failed. Please tap 'Save Settings' to retry.");
+        }else{
+          reload();
+        }
+      }
     }catch(err){
-      alert("Logo upload failed: "+err.message+"\n\nCreate a 'school-assets' public bucket in Supabase Storage first.");
+      alert("Logo upload failed: "+(err?.message||"Unknown error")+"\n\nIf this keeps happening, check that Supabase Storage is reachable and try again.");
     }
     setUploading(false);
+    e.target.value="";
   };
 
   return(
