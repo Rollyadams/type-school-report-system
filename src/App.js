@@ -317,8 +317,12 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   if(term?.resumption_date){
     doc.setFillColor(255,247,237); doc.rect(10,y,W-20,14,"F");
     doc.setDrawColor(251,146,60); doc.line(10,y,10,y+14);
-    doc.setTextColor(234,88,12); doc.setFontSize(9); doc.setFont("helvetica","bold");
-    doc.text(`NEXT TERM RESUMES: ${term.resumption_date}`,14,y+9);
+    doc.setTextColor(234,88,12); doc.setFont("helvetica","bold");
+    const resumeLabel=`NEXT TERM RESUMES: ${term.resumption_date}`;
+    let fs=9;
+    doc.setFontSize(fs);
+    while(doc.getTextWidth(resumeLabel)>W-30 && fs>6){ fs-=0.5; doc.setFontSize(fs); }
+    doc.text(resumeLabel,14,y+9);
     y += 18;
   }
 
@@ -800,13 +804,16 @@ function ParentResultView({ data, onBack }) {
             <div style={{fontSize:18,fontWeight:900,color:"#ea580c",marginTop:4}}>{term.resumption_date}</div>
           </div>
         )}
-        {remarks?.promotion_status&&(
-          <div style={{...S.card,background:remarks.promotion_status==="Promoted"?"#f0fdf4":"#fef2f2",borderLeft:`4px solid ${remarks.promotion_status==="Promoted"?"#10b981":"#ef4444"}`,padding:16}}>
-            <div style={{fontWeight:800,color:remarks.promotion_status==="Promoted"?"#065f46":"#991b1b",fontSize:15}}>
-              {remarks.promotion_status==="Promoted"?"✅ Promoted to Next Class":"🔁 Repeated This Class"}
+        {(remarks?.promotion_status||avg>=0)&&(()=>{
+          const promotionStatus=remarks?.promotion_status||(avg>=40?"Promoted":"Repeated");
+          return(
+          <div style={{...S.card,background:promotionStatus==="Promoted"?"#f0fdf4":"#fef2f2",borderLeft:`4px solid ${promotionStatus==="Promoted"?"#10b981":"#ef4444"}`,padding:16}}>
+            <div style={{fontWeight:800,color:promotionStatus==="Promoted"?"#065f46":"#991b1b",fontSize:15}}>
+              {promotionStatus==="Promoted"?"✅ Promoted to Next Class":"🔁 Repeated This Class"}
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
