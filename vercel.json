@@ -5,7 +5,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co https://api.paystack.co https://checkout.paystack.com https://standard.paystack.co; img-src 'self' data: blob: https://*.paystack.com; font-src 'self' data:; frame-src https://checkout.paystack.com https://standard.paystack.co;"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.supabase.co https://api.paystack.co https://checkout.paystack.com https://standard.paystack.co; img-src 'self' data: blob: https://*.paystack.com https://*.supabase.co; font-src 'self' data:; frame-src https://checkout.paystack.com https://standard.paystack.co;"
         },
         {
           "key": "X-Frame-Options",
