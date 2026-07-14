@@ -5210,17 +5210,33 @@ const LAST_ACTIVE_KEY = "last_active_ts";
 
 export default function App() {
   const [user,setUser]=useState(null);
-  const [screen,setScreen]=useState("login");
+  const [screen,setScreen]=useState("checking");
   const [showTimeoutWarning,setShowTimeoutWarning]=useState(false);
   const timerRef=useRef(null);
   const warnRef=useRef(null);
 
-  // Restore session from stored user ID only — never store full user object
+  // Restore session from stored user ID only — never store full user object.
+  // Start on a neutral "checking" screen (not "login") so a page refresh
+  // doesn't flash the login form before we've had a chance to find and
+  // restore an existing session — that flash was the visible flicker on
+  // every reload.
   useEffect(()=>{
+    let cancelled=false;
     try{
       const uid=sessionStorage.getItem("school_uid");
-      if(uid){ activateUserContext(uid).then(()=>{ db.get("users",{id:uid}).then(rows=>{ if(rows[0]){ setUser(rows[0]); setScreen("app"); } }); }); }
-    }catch(e){}
+      if(uid){
+        activateUserContext(uid).then(()=>{
+          db.get("users",{id:uid}).then(rows=>{
+            if(cancelled) return;
+            if(rows[0]){ setUser(rows[0]); setScreen("app"); }
+            else { setScreen("login"); }
+          }).catch(()=>{ if(!cancelled) setScreen("login"); });
+        }).catch(()=>{ if(!cancelled) setScreen("login"); });
+      } else {
+        setScreen("login");
+      }
+    }catch(e){ setScreen("login"); }
+    return()=>{ cancelled=true; };
   },[]);
 
   const handleLogin=(u)=>{
@@ -5307,6 +5323,12 @@ export default function App() {
         ?<PrincipalDash user={user} onLogout={handleLogout}/>
         :<TeacherDash user={user} onLogout={handleLogout}/>}
     </>
+  );
+
+  if(screen==="checking") return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f8fafc"}}>
+      <div style={{color:"#94a3b8",fontSize:14,fontWeight:600}}>Loading…</div>
+    </div>
   );
 
   if(screen==="register") return <Register onRegistered={handleRegistered}/>;
