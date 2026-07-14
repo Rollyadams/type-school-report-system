@@ -2084,8 +2084,17 @@ function ManageSessions({ sessions, terms, reload, schoolId }) {
 // ── View Results (Principal) ───────────────────────────────────
 function ViewResults({ students, classes, terms, school, isPrincipal }) {
   const scale=normalizeGradeScale(school?.grade_scale);
-  const [selectedClass,setSelectedClass]=useState("");
+  const [selectedClass,setSelectedClass]=useState(classes.length===1?classes[0].id:"");
   const [selectedTerm,setSelectedTerm]=useState(terms.find(t=>t.is_current)?.id||"");
+
+  // Teachers assigned to exactly one class should never have to pick from a
+  // dropdown — auto-select their only class as soon as it's available
+  // (e.g. when `classes` loads asynchronously after this component mounts).
+  useEffect(()=>{
+    if(classes.length===1 && selectedClass!==classes[0].id){
+      setSelectedClass(classes[0].id);
+    }
+  },[classes]);
   const [results,setResults]=useState([]); const [attendance,setAttendance]=useState([]); const [remarks,setRemarks]=useState([]);
   const [loading,setLoading]=useState(false); const [reportStudent,setReportStudent]=useState(null);
   const [generating,setGenerating]=useState(null); const [bulkGenerating,setBulkGenerating]=useState(false);
