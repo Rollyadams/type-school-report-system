@@ -4868,6 +4868,12 @@ function TeacherDash({ user, onLogout }) {
     const c=await db.get("classes",{school_id:user.school_id});
     const filtered=myClassIds.length?c.filter(cls=>myClassIds.includes(cls.id)):c;
     setClasses(filtered);
+    // Single-class teachers should never be stuck on an empty dropdown —
+    // this runs every time the Results tab is visited, so re-apply the
+    // auto-select here too, not just on the initial loadData() call.
+    if(filtered.length===1){
+      setSelectedClass(prev=>prev===filtered[0].id?prev:filtered[0].id);
+    }
   },[user.school_id,user.id,liveClassIds]);
 
   useEffect(()=>{ if(tab==="results") refreshMyClasses(); },[tab]);
