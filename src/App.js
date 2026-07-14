@@ -574,7 +574,7 @@ function Login({ onLogin, onRegister }) {
       await activateUserContext(users[0].id);
       const { password: _pw, ...safeUser } = users[0];
       onLogin(safeUser);
-    }catch(e){setErr("Connection error. Try again.");}
+    }catch(e){console.error("Login error:",e); setErr("Connection error: "+(e?.message||"Try again."));}
     setLoading(false);
   };
 
@@ -5214,10 +5214,15 @@ export default function App() {
   // refreshes and app restarts; the 5-minute inactivity timer below still
   // logs the user out on its own for security.
   useEffect(()=>{
-    try{
-      const uid=localStorage.getItem("school_uid");
-      if(uid){ activateUserContext(uid).then(()=>{ db.get("users",{id:uid}).then(rows=>{ if(rows[0]){ setUser(rows[0]); setScreen("app"); } }); }); }
-    }catch(e){}
+    const uid=(()=>{ try{ return localStorage.getItem("school_uid"); }catch(e){ return null; } })();
+    if(!uid){ setScreen("login"); return; }
+    activateUserContext(uid)
+      .then(()=>db.get("users",{id:uid}))
+      .then(rows=>{
+        if(rows && rows[0]){ setUser(rows[0]); setScreen("app"); }
+        else { try{ localStorage.removeItem("school_uid"); }catch(e){} setScreen("login"); }
+      })
+      .catch(()=>{ try{ localStorage.removeItem("school_uid"); }catch(e){} setScreen("login"); });
   },[]);
 
   const handleLogin=(u)=>{
