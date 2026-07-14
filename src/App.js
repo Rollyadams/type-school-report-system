@@ -5144,7 +5144,7 @@ function Register({ onRegistered }) {
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
       const { password: _pw2, ...safeNewUser } = newUser;
-      sessionStorage.setItem("school_uid", newUser.id);
+      localStorage.setItem("school_uid", newUser.id);
       onRegistered(safeNewUser);
     }catch(e){setErr("Registration failed. Check your connection and try again.");}
     setLoading(false);
@@ -5209,22 +5209,25 @@ export default function App() {
   const timerRef=useRef(null);
   const warnRef=useRef(null);
 
-  // Restore session from stored user ID only — never store full user object
+  // Restore session from stored user ID only — never store full user object.
+  // Uses localStorage (not sessionStorage) so the session survives page
+  // refreshes and app restarts; the 5-minute inactivity timer below still
+  // logs the user out on its own for security.
   useEffect(()=>{
     try{
-      const uid=sessionStorage.getItem("school_uid");
+      const uid=localStorage.getItem("school_uid");
       if(uid){ activateUserContext(uid).then(()=>{ db.get("users",{id:uid}).then(rows=>{ if(rows[0]){ setUser(rows[0]); setScreen("app"); } }); }); }
     }catch(e){}
   },[]);
 
   const handleLogin=(u)=>{
-    sessionStorage.setItem("school_uid", u.id);
+    localStorage.setItem("school_uid", u.id);
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
   };
   const handleRegistered=(u)=>{ if(u){
-    sessionStorage.setItem("school_uid", u.id);
+    localStorage.setItem("school_uid", u.id);
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
@@ -5233,7 +5236,7 @@ export default function App() {
   const handleLogout=useCallback(()=>{
     clearUserContext();
     Sentry.setUser(null);
-    sessionStorage.removeItem("school_uid");
+    localStorage.removeItem("school_uid");
     localStorage.removeItem(LAST_ACTIVE_KEY);
     setUser(null); setScreen("login"); setShowTimeoutWarning(false);
     clearTimeout(timerRef.current); clearTimeout(warnRef.current);
