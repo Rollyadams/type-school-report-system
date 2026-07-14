@@ -5284,16 +5284,11 @@ export default function App() {
     document.addEventListener("visibilitychange",onVisible);
     window.addEventListener("focus",checkInactivity);
 
-    // Logout when app is closed or swiped away
-    const onPageHide=()=>{ handleLogout(); };
-    window.addEventListener("pagehide", onPageHide);
-
     resetTimer();
     return()=>{
       events.forEach(e=>document.removeEventListener(e,resetTimer));
       document.removeEventListener("visibilitychange",onVisible);
       window.removeEventListener("focus",checkInactivity);
-      window.removeEventListener("pagehide", onPageHide);
       clearTimeout(timerRef.current); clearTimeout(warnRef.current);
     };
   },[user]);
