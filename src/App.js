@@ -574,7 +574,7 @@ function Login({ onLogin, onRegister }) {
       await activateUserContext(users[0].id);
       const { password: _pw, ...safeUser } = users[0];
       onLogin(safeUser);
-    }catch(e){console.error("Login error:",e); setErr("Connection error: "+(e?.message||"Try again."));}
+    }catch(e){setErr("Connection error. Try again.");}
     setLoading(false);
   };
 
@@ -5100,7 +5100,7 @@ function TeacherDash({ user, onLogout }) {
       {tab==="results"&&teacherResultsJsx}
       {tab==="attendance"&&<FeatureGate feature="attendance" school={school} onUpgrade={()=>{}}><DailyAttendance user={user} classes={classes} terms={terms} students={allSchoolStudents}/></FeatureGate>}
       {tab==="timetable" &&<Timetable user={user} classes={classes} school={school} isPrincipal={false}/>}
-      {tab==="report"&&<ViewResults students={students} classes={classes.length?classes:[]} terms={terms} school={school} isPrincipal={false}/>}
+      {tab==="report"&&<ViewResults students={students} classes={classes.filter(c=>myClassIds.includes(c.id))} terms={terms} school={school} isPrincipal={false}/>}
     </SidebarLayout>
   );
 }
@@ -5144,7 +5144,7 @@ function Register({ onRegistered }) {
       if(!newUser){setErr("School created but failed to create admin. Contact support.");setLoading(false);return;}
       await activateUserContext(newUser.id);
       const { password: _pw2, ...safeNewUser } = newUser;
-      localStorage.setItem("school_uid", newUser.id);
+      sessionStorage.setItem("school_uid", newUser.id);
       onRegistered(safeNewUser);
     }catch(e){setErr("Registration failed. Check your connection and try again.");}
     setLoading(false);
@@ -5209,30 +5209,22 @@ export default function App() {
   const timerRef=useRef(null);
   const warnRef=useRef(null);
 
-  // Restore session from stored user ID only — never store full user object.
-  // Uses localStorage (not sessionStorage) so the session survives page
-  // refreshes and app restarts; the 5-minute inactivity timer below still
-  // logs the user out on its own for security.
+  // Restore session from stored user ID only — never store full user object
   useEffect(()=>{
-    const uid=(()=>{ try{ return localStorage.getItem("school_uid"); }catch(e){ return null; } })();
-    if(!uid){ setScreen("login"); return; }
-    activateUserContext(uid)
-      .then(()=>db.get("users",{id:uid}))
-      .then(rows=>{
-        if(rows && rows[0]){ setUser(rows[0]); setScreen("app"); }
-        else { try{ localStorage.removeItem("school_uid"); }catch(e){} setScreen("login"); }
-      })
-      .catch(()=>{ try{ localStorage.removeItem("school_uid"); }catch(e){} setScreen("login"); });
+    try{
+      const uid=sessionStorage.getItem("school_uid");
+      if(uid){ activateUserContext(uid).then(()=>{ db.get("users",{id:uid}).then(rows=>{ if(rows[0]){ setUser(rows[0]); setScreen("app"); } }); }); }
+    }catch(e){}
   },[]);
 
   const handleLogin=(u)=>{
-    localStorage.setItem("school_uid", u.id);
+    sessionStorage.setItem("school_uid", u.id);
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
   };
   const handleRegistered=(u)=>{ if(u){
-    localStorage.setItem("school_uid", u.id);
+    sessionStorage.setItem("school_uid", u.id);
     localStorage.setItem(LAST_ACTIVE_KEY, Date.now().toString());
     Sentry.setUser({ id: u.id, email: u.email, username: u.full_name });
     setUser(u); setScreen("app");
@@ -5241,7 +5233,7 @@ export default function App() {
   const handleLogout=useCallback(()=>{
     clearUserContext();
     Sentry.setUser(null);
-    localStorage.removeItem("school_uid");
+    sessionStorage.removeItem("school_uid");
     localStorage.removeItem(LAST_ACTIVE_KEY);
     setUser(null); setScreen("login"); setShowTimeoutWarning(false);
     clearTimeout(timerRef.current); clearTimeout(warnRef.current);
