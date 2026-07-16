@@ -282,7 +282,6 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   const summaryItems=[
     ["Total Marks",String(totalMarks),"#6366f1"],
     ["Average",`${avg}%`,"#0ea5e9"],
-    ["Position",pos?`${ordinal(pos)} of ${allStudents.length}`:"—","#f59e0b"],
     ["Attendance",attendance?`${attendance.days_present}/${attendance.total_days||"—"}`:"—","#10b981"],
     ["Overall",overall.g,overall.col],
     ["Status",promotionStatus||"—",promotionStatus==="Promoted"?"#10b981":promotionStatus==="Repeated"?"#ef4444":"#94a3b8"],
@@ -766,8 +765,8 @@ function ParentResultView({ data, onBack }) {
           <div style={{fontWeight:800,fontSize:16,color:"#1e293b",marginBottom:4}}>{student.full_name}</div>
           <div style={{fontSize:13,color:"#64748b"}}>Class: {cls?.name} {cls?.arm||""} • Adm: {student.admission_number||"—"}</div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:16}}>
-          {[["Average",`${avg}%`,overall.col],["Position",pos?`${ordinal(pos)} / ${allStudents.length}`:"—","#f59e0b"],["Attendance",attendance?`${attendance.days_present}/${attendance.total_days||"—"}`:"—","#10b981"]].map(([l,v,c])=>(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+          {[["Average",`${avg}%`,overall.col],["Attendance",attendance?`${attendance.days_present}/${attendance.total_days||"—"}`:"—","#10b981"]].map(([l,v,c])=>(
             <div key={l} style={{background:`${c}10`,border:`1.5px solid ${c}30`,borderRadius:12,padding:12,textAlign:"center"}}>
               <div style={{fontSize:10,color:c,fontWeight:700,textTransform:"uppercase"}}>{l}</div>
               <div style={{fontSize:18,fontWeight:900,color:c}}>{v}</div>
@@ -2288,8 +2287,8 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
               </tbody>
             </table>
           </div>
-          <div style={{padding:"0 16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            {[["Total",totalMarks,"#6366f1"],["Average",`${avg}%`,"#0ea5e9"],["Position",pos?`${ordinal(pos)} of ${classStudents.length}`:"—","#f59e0b"],["Attendance",att?`${att.days_present}/${att.total_days||"—"}`:"—","#10b981"],["Overall",overall.g,overall.col],["Status",promotionStatus||"—",promotionStatus==="Promoted"?"#10b981":promotionStatus==="Repeated"?"#ef4444":"#94a3b8"]].map(([l,v,col])=>(
+          <div style={{padding:"0 16px 20px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[["Total",totalMarks,"#6366f1"],["Average",`${avg}%`,"#0ea5e9"],["Attendance",att?`${att.days_present}/${att.total_days||"—"}`:"—","#10b981"],["Overall",overall.g,overall.col],["Status",promotionStatus||"—",promotionStatus==="Promoted"?"#10b981":promotionStatus==="Repeated"?"#ef4444":"#94a3b8"]].map(([l,v,col])=>(
               <div key={l} style={{background:`${col}10`,border:`1.5px solid ${col}30`,borderRadius:10,padding:12,textAlign:"center"}}>
                 <div style={{fontSize:10,fontWeight:700,color:col,textTransform:"uppercase",letterSpacing:"0.08em",fontFamily:"sans-serif"}}>{l}</div>
                 <div style={{fontSize:16,fontWeight:900,color:col,marginTop:2,fontFamily:"sans-serif"}}>{v}</div>
