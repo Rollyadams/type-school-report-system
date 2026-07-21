@@ -1718,7 +1718,7 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
     const currentTerm=terms.find(t=>t.is_current);
     if(!currentTerm){alert("No current term set. Please set a current term first.");return;}
     if(!currentTerm.name.toLowerCase().includes("third")){alert(`Auto-promotion only runs in Third Term.\n\nCurrent term is "${currentTerm.name}". Please set Third Term as current first.`);return;}
-    if(!window.confirm(`Auto-promote ALL students for "${currentTerm.name}"?\n\nRules:\n• Avg ≥ 40% = Promoted\n• Avg < 40% = Repeated\n• Must pass English & Maths (avg ≥ 40 each) to promote\n\nThis will update every student's promotion status.`)) return;
+    if(!window.confirm(`Auto-promote ALL students for "${currentTerm.name}"?\n\nRules:\n• Avg ≥ 40% = Promoted\n• Avg < 40% = Repeated\n• Must pass English & Maths (avg ≥ 40 each) to promote\n• Students with an existing manually-set status will be SKIPPED and left as-is\n\nThis will only update students who have no status set yet.`)) return;
     setAutoPromoting(true); setAutoResult(null);
     let promoted=0,repeated=0,errors=0;
     for(const cls of classes){
@@ -1734,6 +1734,15 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
           db.get("remarks",{term_id:currentTerm.id,student_id:ids}),
         ]);
         for(const s of classStudents){
+          const rem=remarks.find(r=>r.student_id===s.id);
+          // Never silently overwrite a status that was already saved
+          // (manually via the dropdown, or by a prior auto-promotion run).
+          // This is what caused manually-corrected students to flip back
+          // to "Repeated" a minute after being fixed.
+          if(rem?.promotion_status){ 
+            if(rem.promotion_status==="Promoted"||rem.promotion_status==="Graduated") promoted++; else repeated++;
+            continue;
+          }
           const total=subjects.reduce((a,sub)=>{const r=results.find(x=>x.student_id===s.id&&x.subject_name===sub);return a+(r?.ca_score||0)+(r?.exam_score||0);},0);
           const avg=subjects.length?Math.round(total/subjects.length):0;
           // Rule: must also pass English & Maths individually
@@ -1744,7 +1753,6 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
           const passCoreSubjects = engScore>=40 && mathScore>=40;
           const isFinalClass=!nextClassName;
           const status=isFinalClass?"Graduated":(avg>=40&&passCoreSubjects?"Promoted":"Repeated");
-          const rem=remarks.find(r=>r.student_id===s.id);
           if(rem?.id) await db.patch("remarks",rem.id,{promotion_status:status});
           else await db.post("remarks",{student_id:s.id,term_id:currentTerm.id,promotion_status:status});
           if(status==="Promoted"&&nextClass) await db.patch("students",s.id,{class_id:nextClass.id});
