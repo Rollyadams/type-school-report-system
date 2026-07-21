@@ -1041,12 +1041,22 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
       if(!window.confirm(`No next class found for "${cls?.name}". Promoted students stay. Continue?`)) return;
     }
     setPromoting(true);
+    // Re-fetch remarks fresh right before writing so we never act on a stale
+    // closure (fixes: dropdown edits reverting after refresh).
+    const ids=classStudents.map(s=>s.id);
+    const freshRemarks=ids.length?await db.get("remarks",{term_id:selectedTerm,student_id:ids}):[];
     for(const student of classStudents){
       const status=promotionMap[student.id]||"Promoted";
-      const rem=remarks.find(r=>r.student_id===student.id);
+      const rem=freshRemarks.find(r=>r.student_id===student.id);
       if(rem?.id) await db.patch("remarks",rem.id,{promotion_status:status});
       else await db.post("remarks",{student_id:student.id,term_id:selectedTerm,promotion_status:status});
-      if(status==="Promoted"&&nextClass) await db.patch("students",student.id,{class_id:nextClass.id});
+      // Only move students who are still in THIS class and haven't already
+      // been moved to nextClass (fixes: auto-promote re-promoting students
+      // on every click, since a stale "Promoted" tag would otherwise keep
+      // bumping them forward each run).
+      if(status==="Promoted"&&nextClass&&student.class_id===selectedClass){
+        await db.patch("students",student.id,{class_id:nextClass.id});
+      }
     }
     setPromoting(false); setDone(true); reload();
   };
@@ -1104,8 +1114,8 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
               <div style={{color:"#064e3b",fontSize:13,marginTop:4}}>Students moved to their new classes.</div>
             </div>
           )}
-          <button onClick={applyPromotion} disabled={promoting} style={{...S.btn("#f59e0b"),width:"100%",padding:"14px",fontSize:15}}>
-            {promoting?"Applying Promotion…":"🎖️ Apply Promotion to All"}
+          <button onClick={applyPromotion} disabled={promoting||done} style={{...S.btn("#f59e0b"),width:"100%",padding:"14px",fontSize:15,opacity:(promoting||done)?0.6:1}}>
+            {promoting?"Applying Promotion…":done?"✅ Applied — reselect class to run again":"🎖️ Apply Promotion to All"}
           </button>
         </>
       )}
