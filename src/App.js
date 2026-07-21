@@ -1004,7 +1004,7 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
   const nextClass=nextClassName?classes.find(c=>c.name===nextClassName):null;
 
   useEffect(()=>{
-    if(!selectedClass||!selectedTerm){return;}
+    if(!selectedClass||!selectedTerm||!subjects.length){return;}
     setLoading(true); setDone(false);
     const ids=students.filter(s=>s.class_id===selectedClass).map(s=>s.id);
     if(!ids.length){setResults([]);setRemarks([]);setLoading(false);return;}
@@ -1015,11 +1015,13 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
       setResults(r); setRemarks(rem);
       const map={};
       students.filter(s=>s.class_id===selectedClass).forEach(s=>{
+        const savedStatus=rem.find(x=>x.student_id===s.id)?.promotion_status;
+        if(savedStatus){map[s.id]=savedStatus;return;}
         const total=subjects.reduce((a,sub)=>{
           const res=r.find(x=>x.student_id===s.id&&x.subject_name===sub);
           return a+(res?.ca_score||0)+(res?.exam_score||0);
         },0);
-        const avg=subjects.length?Math.round(total/subjects.length):0;
+        const avg=Math.round(total/subjects.length);
         map[s.id]=avg>=40?"Promoted":"Repeated";
       });
       setPromotionMap(map); setLoading(false);
