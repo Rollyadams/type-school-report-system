@@ -1718,15 +1718,38 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
     const currentTerm=terms.find(t=>t.is_current);
     if(!currentTerm){alert("No current term set. Please set a current term first.");return;}
     if(!currentTerm.name.toLowerCase().includes("third")){alert(`Auto-promotion only runs in Third Term.\n\nCurrent term is "${currentTerm.name}". Please set Third Term as current first.`);return;}
-    if(!window.confirm(`Auto-promote ALL students for "${currentTerm.name}"?\n\nRules:\n• Avg ≥ 40% = Promoted\n• Avg < 40% = Repeated\n• Must pass English & Maths (avg ≥ 40 each) to promote\n• Students with an existing manually-set status will be SKIPPED and left as-is\n\nThis will only update students who have no status set yet.`)) return;
+    // Strong guard: this is irreversible and affects the whole school, so
+    // require the user to type a confirmation phrase rather than a simple
+    // OK/Cancel dialog, which is too easy to click through by accident.
+    const typed=window.prompt(`⚠️ AUTO-PROMOTE ALL CLASSES — IRREVERSIBLE\n\nThis will move students across EVERY class in the school for "${currentTerm.name}", and cannot be undone from within the app.\n\nClasses migrate top-down: a class will only release its promoted students once the class above it has finished migrating, so classes never merge into each other mid-migration.\n\nStudents with an existing manually-set status are skipped and left as-is.\n\nType MIGRATE to confirm you want to run this now:`);
+    if(typed!=="MIGRATE") { if(typed!==null) alert("Confirmation text did not match. Auto-promotion cancelled — nothing was changed."); return; }
     setAutoPromoting(true); setAutoResult(null);
     let promoted=0,repeated=0,errors=0;
-    for(const cls of classes){
+    // Process classes highest-to-lowest (reverse CLASS_ORDER) so that a
+    // class only migrates its promoted students into the class above it
+    // AFTER that class above has already been fully migrated out. This
+    // prevents e.g. JSS1A's promoted students merging into JSS2A while
+    // JSS2A's own students are still sitting there waiting to move up —
+    // which is exactly what caused the earlier data mixup.
+    const orderedClasses=[...classes].sort((a,b)=>{
+      const oa=CLASS_ORDER.indexOf(a.name); const ob=CLASS_ORDER.indexOf(b.name);
+      return (ob===-1?-1:ob)-(oa===-1?-1:oa); // highest class first
+    });
+    // Track which class names have completed migration this run, so a
+    // lower class can check whether the class above it is clear yet.
+    const migratedClassNames=new Set();
+    for(const cls of orderedClasses){
       const classStudents=students.filter(s=>s.class_id===cls.id);
-      if(!classStudents.length) continue;
-      const subjects=getSubjects(cls);
       const nextClassName=getNextClassName(cls.name);
       const nextClass=nextClassName?classes.find(c=>c.name===nextClassName):null;
+      // Cascade check: if this class has a next class to migrate into, that
+      // next class must have already finished migrating THIS run before we
+      // move anyone into it. If it hasn't (and it exists with students),
+      // skip this class entirely for now — repeated students still get
+      // processed below since they never move classes anyway.
+      const nextClassBlocking = nextClassName && classes.some(c=>c.name===nextClassName) && !migratedClassNames.has(nextClassName);
+      if(!classStudents.length){ migratedClassNames.add(cls.name); continue; }
+      const subjects=getSubjects(cls);
       const ids=classStudents.map(s=>s.id);
       try{
         const [results,remarks]=await Promise.all([
@@ -1752,12 +1775,22 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
           const mathScore=mathRes?(mathRes.ca_score||0)+(mathRes.exam_score||0):0;
           const passCoreSubjects = engScore>=40 && mathScore>=40;
           const isFinalClass=!nextClassName;
-          const status=isFinalClass?"Graduated":(avg>=40&&passCoreSubjects?"Promoted":"Repeated");
+          const wouldPromote = avg>=40 && passCoreSubjects;
+          // If this student would be promoted but the class above hasn't
+          // migrated yet, hold off entirely — don't write any status yet,
+          // so they get picked up correctly on a later run once the class
+          // above has cleared. Repeated students are unaffected by this
+          // since they never move, so we still process them below.
+          if(wouldPromote && nextClassBlocking){
+            continue;
+          }
+          const status=isFinalClass?"Graduated":(wouldPromote?"Promoted":"Repeated");
           if(rem?.id) await db.patch("remarks",rem.id,{promotion_status:status});
           else await db.post("remarks",{student_id:s.id,term_id:currentTerm.id,promotion_status:status});
           if(status==="Promoted"&&nextClass) await db.patch("students",s.id,{class_id:nextClass.id});
           if(status==="Promoted"||status==="Graduated") promoted++; else repeated++;
         }
+        if(!nextClassBlocking) migratedClassNames.add(cls.name);
       }catch(e){errors++;}
     }
     setAutoPromoting(false);
@@ -1845,7 +1878,7 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
       {/* Option B+C: Auto-Promotion Panel */}
       <div style={{...S.card,background:"linear-gradient(135deg,#fef3c7,#fffbeb)",border:"1.5px solid #f59e0b",marginBottom:16,padding:16}}>
         <div style={{fontWeight:800,color:"#92400e",fontSize:14,marginBottom:6}}>🤖 Auto-Promotion Engine</div>
-        <div style={{fontSize:12,color:"#78350f",marginBottom:10,lineHeight:1.5}}>Runs promotion for <strong>all classes</strong> using the current term. <strong>Only works in Third Term.</strong> Rules: Avg ≥ 40% + pass English & Maths individually = Promoted. Final class = Graduated.</div>
+        <div style={{fontSize:12,color:"#78350f",marginBottom:10,lineHeight:1.5}}>Runs promotion for <strong>all classes</strong> using the current term. <strong>Only works in Third Term.</strong> Rules: Avg ≥ 40% + pass English & Maths individually = Promoted. Final class = Graduated. Classes migrate <strong>top-down</strong> — a class only releases its promoted students once the class above it has finished migrating, so classes can never merge into each other mid-run. Students who already have a saved status are skipped. Requires typed confirmation — irreversible, affects the whole school.</div>
         {autoResult&&(
           <div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
             <div style={{fontWeight:800,color:"#065f46"}}>✅ Done for {autoResult.term}</div>
