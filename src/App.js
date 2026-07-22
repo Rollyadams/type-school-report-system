@@ -277,14 +277,14 @@ const generateReportPDF = async (student, cls, term, subjects, results, attendan
   },0);
   const ranked=[...allStudents.map(s=>s.id)].sort((a,b)=>getStudentTotal(b)-getStudentTotal(a));
   const pos=ranked.indexOf(student.id)+1;
-  const promotionStatus=remarks?.promotion_status||(avg>=40?"Promoted":"Repeated");
+  const promotionStatus=remarks?.promotion_status||(subjectResults.length===0?"Pending":(avg>=40?"Promoted":"Repeated"));
 
   const summaryItems=[
     ["Total Marks",String(totalMarks),"#6366f1"],
     ["Average",`${avg}%`,"#0ea5e9"],
     ["Attendance",attendance?`${attendance.days_present}/${attendance.total_days||"—"}`:"—","#10b981"],
     ["Overall",overall.g,overall.col],
-    ["Status",promotionStatus||"—",promotionStatus==="Promoted"?"#10b981":promotionStatus==="Repeated"?"#ef4444":"#94a3b8"],
+    ["Status",promotionStatus||"—",promotionStatus==="Promoted"?"#10b981":promotionStatus==="Repeated"?"#ef4444":promotionStatus==="Pending"?"#94a3b8":"#94a3b8"],
   ];
   const boxW=(W-20)/summaryItems.length;
   summaryItems.forEach((item,i)=>{
@@ -807,11 +807,13 @@ function ParentResultView({ data, onBack }) {
           </div>
         )}
         {(remarks?.promotion_status||avg>=0)&&(()=>{
-          const promotionStatus=remarks?.promotion_status||(avg>=40?"Promoted":"Repeated");
+          const promotionStatus=remarks?.promotion_status||(sResults.length===0?"Pending":(avg>=40?"Promoted":"Repeated"));
+          const isPending=promotionStatus==="Pending";
+          const isPromoted=promotionStatus==="Promoted";
           return(
-          <div style={{...S.card,background:promotionStatus==="Promoted"?"#f0fdf4":"#fef2f2",borderLeft:`4px solid ${promotionStatus==="Promoted"?"#10b981":"#ef4444"}`,padding:16}}>
-            <div style={{fontWeight:800,color:promotionStatus==="Promoted"?"#065f46":"#991b1b",fontSize:15}}>
-              {promotionStatus==="Promoted"?"✅ Promoted to Next Class":"🔁 Repeated This Class"}
+          <div style={{...S.card,background:isPending?"#f8fafc":isPromoted?"#f0fdf4":"#fef2f2",borderLeft:`4px solid ${isPending?"#94a3b8":isPromoted?"#10b981":"#ef4444"}`,padding:16}}>
+            <div style={{fontWeight:800,color:isPending?"#475569":isPromoted?"#065f46":"#991b1b",fontSize:15}}>
+              {isPending?"⏳ Results Pending":isPromoted?"✅ Promoted to Next Class":"🔁 Repeated This Class"}
             </div>
           </div>
           );
@@ -1017,6 +1019,8 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
       students.filter(s=>s.class_id===selectedClass).forEach(s=>{
         const savedStatus=rem.find(x=>x.student_id===s.id)?.promotion_status;
         if(savedStatus){map[s.id]=savedStatus;return;}
+        const hasResults = subjects.some(sub=>r.some(x=>x.student_id===s.id&&x.subject_name===sub));
+        if(!hasResults){map[s.id]="NoResults";return;}
         const total=subjects.reduce((a,sub)=>{
           const res=r.find(x=>x.student_id===s.id&&x.subject_name===sub);
           return a+(res?.ca_score||0)+(res?.exam_score||0);
@@ -1037,6 +1041,11 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
   };
 
   const applyPromotion=async()=>{
+    const unresolved=classStudents.filter(s=>(promotionMap[s.id]||"Promoted")==="NoResults");
+    if(unresolved.length){
+      alert(`⚠️ ${unresolved.length} student${unresolved.length>1?"s have":" has"} no results entered yet and no status chosen:\n\n${unresolved.map(s=>s.full_name).join(", ")}\n\nPlease choose Promoted, Repeated, or Graduated for each before applying.`);
+      return;
+    }
     if(!nextClass&&Object.values(promotionMap).some(v=>v==="Promoted")){
       if(!window.confirm(`No next class found for "${cls?.name}". Promoted students stay. Continue?`)) return;
     }
@@ -1093,13 +1102,15 @@ function PromoteStudents({ students, classes, terms, reload, school }) {
           )}
           {classStudents.map(s=>{
             const avg=getAvg(s.id); const g=getGrade(avg,normalizeGradeScale(school?.grade_scale)); const status=promotionMap[s.id]||"Promoted";
+            const noResults=status==="NoResults";
             return(
-              <div key={s.id} style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8}}>
+              <div key={s.id} style={{...S.card,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",marginBottom:8,...(noResults?{background:"#fffbeb",border:"1.5px solid #fbbf24"}:{})}}>
                 <div>
                   <div style={{fontWeight:700,color:"#1e293b"}}>{s.full_name}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>Avg: {avg}% • <span style={{color:g.col,fontWeight:700}}>{g.g}</span></div>
+                  <div style={{fontSize:12,color:"#64748b"}}>{noResults?<span style={{color:"#b45309",fontWeight:700}}>⚠️ No results entered yet</span>:<>Avg: {avg}% • <span style={{color:g.col,fontWeight:700}}>{g.g}</span></>}</div>
                 </div>
-                <select value={status} onChange={e=>setPromotionMap(p=>({...p,[s.id]:e.target.value}))} style={{...S.input,width:"auto",padding:"8px 12px",fontWeight:700,color:status==="Promoted"?"#059669":status==="Repeated"?"#dc2626":"#6366f1"}}>
+                <select value={status} onChange={e=>setPromotionMap(p=>({...p,[s.id]:e.target.value}))} style={{...S.input,width:"auto",padding:"8px 12px",fontWeight:700,color:status==="Promoted"?"#059669":status==="Repeated"?"#dc2626":status==="NoResults"?"#b45309":"#6366f1"}}>
+                  {noResults&&<option value="NoResults">⚠️ No Results — choose one</option>}
                   <option value="Promoted">✅ Promoted</option>
                   <option value="Repeated">🔁 Repeated</option>
                   <option value="Graduated">🎓 Graduated</option>
@@ -1724,7 +1735,8 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
     const typed=window.prompt(`⚠️ AUTO-PROMOTE ALL CLASSES — IRREVERSIBLE\n\nThis will move students across EVERY class in the school for "${currentTerm.name}", and cannot be undone from within the app.\n\nClasses migrate top-down: a class will only release its promoted students once the class above it has finished migrating, so classes never merge into each other mid-migration.\n\nStudents with an existing manually-set status are skipped and left as-is.\n\nType MIGRATE to confirm you want to run this now:`);
     if(typed!=="MIGRATE") { if(typed!==null) alert("Confirmation text did not match. Auto-promotion cancelled — nothing was changed."); return; }
     setAutoPromoting(true); setAutoResult(null);
-    let promoted=0,repeated=0,errors=0;
+    let promoted=0,repeated=0,errors=0,held=0,noResultsCount=0;
+    const blockedClasses=[]; // classes where at least one promotion was held back this run
     // Process classes highest-to-lowest (reverse CLASS_ORDER) so that a
     // class only migrates its promoted students into the class above it
     // AFTER that class above has already been fully migrated out. This
@@ -1766,6 +1778,13 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
             if(rem.promotion_status==="Promoted"||rem.promotion_status==="Graduated") promoted++; else repeated++;
             continue;
           }
+          const hasResults = subjects.some(sub=>results.some(x=>x.student_id===s.id&&x.subject_name===sub));
+          if(!hasResults){
+            // No results entered at all — don't guess "Repeated". Leave
+            // unset so staff can review and decide manually.
+            noResultsCount++;
+            continue;
+          }
           const total=subjects.reduce((a,sub)=>{const r=results.find(x=>x.student_id===s.id&&x.subject_name===sub);return a+(r?.ca_score||0)+(r?.exam_score||0);},0);
           const avg=subjects.length?Math.round(total/subjects.length):0;
           // Rule: must also pass English & Maths individually
@@ -1782,6 +1801,7 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
           // above has cleared. Repeated students are unaffected by this
           // since they never move, so we still process them below.
           if(wouldPromote && nextClassBlocking){
+            held++;
             continue;
           }
           const status=isFinalClass?"Graduated":(wouldPromote?"Promoted":"Repeated");
@@ -1791,10 +1811,11 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
           if(status==="Promoted"||status==="Graduated") promoted++; else repeated++;
         }
         if(!nextClassBlocking) migratedClassNames.add(cls.name);
+        else if(classStudents.some(s=>{const r=remarks.find(x=>x.student_id===s.id);return !r?.promotion_status;})) blockedClasses.push(`${cls.name}${cls.arm?" "+cls.arm:""} (waiting on ${nextClassName})`);
       }catch(e){errors++;}
     }
     setAutoPromoting(false);
-    setAutoResult({promoted,repeated,errors,term:currentTerm.name});
+    setAutoResult({promoted,repeated,errors,held,noResultsCount,blockedClasses,term:currentTerm.name});
     reload();
   };
 
@@ -1883,6 +1904,21 @@ function ManageClasses({ classes: classesProp, reload, schoolId, students, terms
           <div style={{background:"#f0fdf4",border:"1.5px solid #10b981",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
             <div style={{fontWeight:800,color:"#065f46"}}>✅ Done for {autoResult.term}</div>
             <div style={{color:"#064e3b",marginTop:4}}>🎓 Promoted/Graduated: <strong>{autoResult.promoted}</strong> &nbsp;•&nbsp; 🔁 Repeated: <strong>{autoResult.repeated}</strong>{autoResult.errors>0&&<span style={{color:"#dc2626"}}> &nbsp;•&nbsp; ⚠️ Errors: {autoResult.errors}</span>}</div>
+            {autoResult.noResultsCount>0&&(
+              <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #a7f3d0"}}>
+                <div style={{color:"#b45309",fontWeight:800}}>⚠️ No results entered: {autoResult.noResultsCount} student{autoResult.noResultsCount>1?"s":""}</div>
+                <div style={{color:"#78350f",marginTop:2}}>These students have no results at all for this term, so nothing was assumed for them. Check the class's "Promote/Retain Students" screen to set their status manually.</div>
+              </div>
+            )}
+            {autoResult.held>0&&(
+              <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #a7f3d0"}}>
+                <div style={{color:"#92400e",fontWeight:800}}>⏸️ Held back: {autoResult.held} student{autoResult.held>1?"s":""}</div>
+                <div style={{color:"#78350f",marginTop:2}}>These students would be promoted but the class above them hasn't migrated yet, so nothing was changed for them. Run Auto-Promotion again after the blocking class(es) are handled.</div>
+                {autoResult.blockedClasses?.length>0&&(
+                  <div style={{color:"#78350f",marginTop:4}}>Blocked: {autoResult.blockedClasses.join(", ")}</div>
+                )}
+              </div>
+            )}
           </div>
         )}
         <button onClick={runAutoPromotion} disabled={autoPromoting} style={{...S.btn("#f59e0b"),width:"100%",padding:"11px",fontSize:13}}>
@@ -2281,7 +2317,7 @@ function ViewResults({ students, classes, terms, school, isPrincipal }) {
     const avg=sResults.length?Math.round(totalMarks/sResults.length):0;
     const pos=getPosition(reportStudent.id);
     const overall=getGrade(avg,scale);
-    const promotionStatus=rem?.promotion_status||(avg>=40?"Promoted":"Repeated");
+    const promotionStatus=rem?.promotion_status||(sResults.length===0?"Pending":(avg>=40?"Promoted":"Repeated"));
     return(
       <div>
         <div style={{display:"flex",gap:8,padding:"12px 0",flexWrap:"wrap"}}>
@@ -4965,14 +5001,23 @@ function TeacherDash({ user, onLogout }) {
     setSelectedStudent(null);
   },[selectedClass]);
 
+  const loadRequestId=useRef(0);
   useEffect(()=>{setSaved(false);if(selectedStudent&&selectedTerm) loadStudentData();},[selectedStudent,selectedTerm]);
 
   const loadStudentData=async()=>{
+    // Guard against out-of-order responses: if the student/term changes
+    // again before this fetch resolves, an older, slower response must
+    // never overwrite state with stale data (this was the root cause of
+    // scores silently reverting — a fast tab-switch could let an old
+    // load "win" and repopulate `scores` incorrectly right before save).
+    const myRequestId=++loadRequestId.current;
+    const thisStudent=selectedStudent.id, thisTerm=selectedTerm;
     const [r,a,rem]=await Promise.all([
-      db.get("results",{student_id:selectedStudent.id,term_id:selectedTerm}),
-      db.get("attendance",{student_id:selectedStudent.id,term_id:selectedTerm}),
-      db.get("remarks",{student_id:selectedStudent.id,term_id:selectedTerm}),
+      db.get("results",{student_id:thisStudent,term_id:thisTerm}),
+      db.get("attendance",{student_id:thisStudent,term_id:thisTerm}),
+      db.get("remarks",{student_id:thisStudent,term_id:thisTerm}),
     ]);
+    if(myRequestId!==loadRequestId.current) return; // a newer load superseded this one — discard
     const sc={};
     r.forEach(res=>{sc[res.subject_name]={ca:res.ca_score,exam:res.exam_score,id:res.id};});
     setScores(sc);setCurrentResults(r);
@@ -4999,7 +5044,22 @@ function TeacherDash({ user, onLogout }) {
     // round-trip per subject, plus attendance, plus remark) was the cause
     // of saves taking several seconds longer than necessary on mobile data.
     const resultWrites = subjects.map(async sub=>{
-      const sc=scores[sub]||{ca:0,exam:0};
+      const sc=scores[sub];
+      // If this subject has no entry in `scores` at all AND no existing
+      // saved row, it means the teacher never touched it this session —
+      // skip it entirely rather than writing a 0/0 default. Previously
+      // this silently created/overwrote rows with {ca:0,exam:0} whenever
+      // `scores[sub]` was missing (e.g. a stale state race between
+      // switching students/terms quickly), which is what caused genuinely
+      // entered scores to "go blank" days after being saved.
+      if(!sc){
+        const existing=currentResults.find(r=>r.subject_name===sub);
+        if(!existing) return null; // nothing saved, nothing entered — skip
+        // There IS an existing saved row but our local state doesn't have
+        // it loaded — do NOT touch it. Return its saved values as-is so
+        // currentResults stays accurate without overwriting the database.
+        return {subject_name:sub,ca_score:existing.ca_score,exam_score:existing.exam_score,id:existing.id};
+      }
       const caVal=Math.min(40,Math.max(0,Number(sc.ca)||0));
       const examVal=Math.min(60,Math.max(0,Number(sc.exam)||0));
       if(sc.id){ await db.patch("results",sc.id,{ca_score:caVal,exam_score:examVal}); return {subject_name:sub,ca_score:caVal,exam_score:examVal,id:sc.id}; }
@@ -5018,7 +5078,7 @@ function TeacherDash({ user, onLogout }) {
       setRemarks(p=>({...p,teacher_remark:liveRemark}));
     })();
     const [savedList]=await Promise.all([Promise.all(resultWrites),attendanceWrite,remarkWrite]);
-    setCurrentResults(savedList.map(r=>({...r,student_id:selectedStudent.id,term_id:selectedTerm})));
+    setCurrentResults(savedList.filter(Boolean).map(r=>({...r,student_id:selectedStudent.id,term_id:selectedTerm})));
     // Post notification for principal — fire-and-forget, doesn't need to block "saved" feedback
     (async()=>{
       try{
